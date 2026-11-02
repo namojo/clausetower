@@ -5,3 +5,7 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 .venv/
+_workspace/
+_workspace_*/
+
+node_modules/

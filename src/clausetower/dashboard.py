@@ -12,6 +12,7 @@ __STYLE__
 """
 
 JS = r"""
+__ENGINE__
 __RENDER__
 const DATA = __DATA__;
 let cur = DATA[0].scenario.id;
@@ -54,9 +55,10 @@ def build_dashboard(reports: list[Report], out_path: Path) -> Path:
     data = json.dumps([json.loads(r.model_dump_json()) for r in reports], ensure_ascii=False)
     web = Path(__file__).parent / "web"
     render_js = (web / "render.js").read_text(encoding="utf-8")
+    engine_js = (web / "engine.js").read_text(encoding="utf-8")  # 조치 보드의 what-if가 웹과 같은 조건 결합 규칙을 쓰게 한다
     css = CSS.replace("__STYLE__", (web / "style.css").read_text(encoding="utf-8"))
     html = (HTML.replace("__CSS__", css).replace("__CONTRACTS__", contracts).replace("__TABS__", tabs).replace("__CLEGEND__", legend)
-            .replace("__JS__", JS.replace("__RENDER__", render_js).replace("__DATA__", data.replace("</", "<\\/"))))
+            .replace("__JS__", JS.replace("__ENGINE__", engine_js).replace("__RENDER__", render_js).replace("__DATA__", data.replace("</", "<\\/"))))
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(html, encoding="utf-8")
     return out_path

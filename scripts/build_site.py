@@ -15,8 +15,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from clausetower.contracts import list_scenarios, load_contract_text, load_customers, load_golden_judgment, load_golden_terms, load_scenario  # noqa: E402
+from clausetower.extract import judge_force_majeure  # noqa: E402
+from clausetower.llm import LLM  # noqa: E402
 from clausetower.schemas import ExtractionResult, ForceMajeureJudgment, Report  # noqa: E402
-from clausetower.sim import build_shipments  # noqa: E402
+from clausetower.sim import POLICIES, Context, build_shipments, run_policy, search_best_order  # noqa: E402
 
 WEB = ROOT / "src" / "clausetower" / "web"
 SITE = ROOT / "site"
@@ -26,6 +28,38 @@ SEEDS = [None, 101, 102, 103, 104]  # None = 시나리오 기본 시드
 
 def dump(model):
     return json.loads(model.model_dump_json())
+
+
+def python_search(sid: str, sc, customers, real_report: Report | None) -> dict:
+    """기본 설정(시드 A)에서 파이썬이 찾은 '탐색 근사 최적'의 순서와 총액. 웹은 기본 설정이면 이 순서를 그대로 돌려
+    문서·대시보드와 같은 값을 보여 준다. 정답지 출처는 out/demo 보고서가 현재 코드와 맞으면 재사용하고, 아니면 다시 탐색한다."""
+    out: dict = {}
+    llm = LLM("mock")
+    terms = {c.id: load_golden_terms(c.id) for c in customers}
+    judg = {c.id: judge_force_majeure(llm, c.id, terms[c.id], sc.event, sid) for c in customers}
+    ships = build_shipments(sc, customers)
+    ctx = Context(scenario=sc, terms=terms, judgments=judg, customers={c.id: c for c in customers})
+    label, fn = POLICIES["exposure_first"]
+    start = [r.shipment_id for r in run_policy(sc, ships, ctx, fn, "exposure_first", label).records]
+    best = None
+    cached = ROOT / "out" / "demo" / f"report_{sid}.json"
+    if cached.is_file():
+        try:
+            r = Report.model_validate_json(cached.read_text(encoding="utf-8"))
+            sb = r.policies.get("search_best")
+            if r.llm_mode == "mock" and sb and [x.shipment_id for x in r.policies["exposure_first"].records] == start:
+                order = [x.shipment_id for x in sb.records]
+                if run_policy(sc, ships, ctx, POLICIES["deadline_first"][1], "search", "탐색", order=order).total_penalty_krw == sb.total_penalty_krw:
+                    best = sb
+        except ValueError:
+            best = None
+    if best is None:
+        best = search_best_order(sc, ships, ctx, start=start)
+    out["golden"] = {"total": best.total_penalty_krw, "order": [x.shipment_id for x in best.records]}
+    if real_report and "search_best" in real_report.policies:
+        sb = real_report.policies["search_best"]
+        out["real"] = {"total": sb.total_penalty_krw, "order": [x.shipment_id for x in sb.records]}
+    return out
 
 
 def build_data() -> dict:
@@ -39,7 +73,10 @@ def build_data() -> dict:
         any_r = next(iter(real_reports.values()))
         real_terms = {cid: dump(t) for cid, t in any_r.terms.items()}
         real_extraction = {cid: dump(e) for cid, e in any_r.extraction.items()}
-        real_meta = {"llm_mode": any_r.llm_mode, "model": "claude-opus-5-5", "scenarios": sorted(real_reports)}
+        fallbacks = sum(r.llm_fallbacks for r in real_reports.values())
+        real_meta = {"llm_mode": any_r.llm_mode, "model": "claude-opus-5-5", "scenarios": sorted(real_reports), "llm_fallbacks": fallbacks}
+        if fallbacks:
+            print(f"경고: 실제 모델 보고서에 LLM 실패로 인한 정답지 대체가 {fallbacks}회 있다. 출처 라벨에 표시한다.", file=sys.stderr)
     scenarios = []
     order = {"typhoon": 0, "port_congestion": 1, "wms_outage": 2}
     for sid in sorted(list_scenarios(), key=lambda x: order.get(x, 9)):
@@ -51,13 +88,14 @@ def build_data() -> dict:
         judg = {"golden": {c.id: dump(load_golden_judgment(c.id, sid)) for c in customers}}
         if sid in real_reports:
             judg["real"] = {cid: dump(j) for cid, j in real_reports[sid].judgments.items()}
-        scenarios.append({"scenario": dump(sc), "shipments_by_seed": by_seed, "judgments": judg})
+        scenarios.append({"scenario": dump(sc), "shipments_by_seed": by_seed, "judgments": judg,
+                          "search_best": python_search(sid, sc, customers, real_reports.get(sid))})
     return {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "customers": [dump(c) for c in customers],
         "contracts": {c.id: load_contract_text(c.id) for c in customers},
         "sources": {"golden": {"terms": golden_terms, "extraction": golden_extraction, "label": "정답지(팀 작성)"},
-                    **({"real": {"terms": real_terms, "extraction": real_extraction, "label": f"실제 Claude 추출({real_meta.get('model')})", "meta": real_meta}} if real_terms else {})},
+                    **({"real": {"terms": real_terms, "extraction": real_extraction, "label": f"실제 Claude 추출({real_meta.get('model')})" + (f" · 대체 {real_meta['llm_fallbacks']}회 포함" if real_meta.get("llm_fallbacks") else ""), "meta": real_meta}} if real_terms else {})},
         "scenarios": scenarios,
         "prompts": {"extract": (ROOT / "prompts" / "extract.md").read_text(encoding="utf-8"),
                     "judge": (ROOT / "prompts" / "judge.md").read_text(encoding="utf-8")},
@@ -100,10 +138,11 @@ HTML = """<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name=
       <div class="step"><h3><span class="no">1</span>AI 연결</h3>
         <select id="k-backend"><option value="api">Anthropic API 키 (브라우저에서 직접 호출)</option><option value="helper">로컬 도우미 (Claude 구독·Claude Code CLI, 사내 LLM 중계)</option><option value="custom">사내·호환 엔드포인트 (직접 호출)</option></select>
         <div class="hint" id="k-help"></div>
-        <div data-for="api"><div class="row"><input type="password" id="k-key" placeholder="sk-ant-…" style="flex:1"><button class="btn" id="k-save">저장</button><button class="btn ghost" id="k-clear">지움</button></div><div class="hint">키는 이 브라우저에만 저장되고 api.anthropic.com으로만 간다.</div>
+        <div data-for="api"><div class="row"><input type="password" id="k-key" placeholder="sk-ant-…" style="flex:1"><button class="btn" id="k-save">저장</button><button class="btn ghost" id="k-clear">지움</button></div><div class="hint">키는 api.anthropic.com으로만 가고, 기본으로 이 탭에만 남는다(닫으면 지워짐). 브라우저 직접 호출은 Anthropic이 'dangerous-direct-browser-access'로 표시한 방식이니 개인용·사용량 제한 키를 쓰고, 끝나면 "지움"을 누른다.</div>
           <select id="k-model" style="margin-top:6px"><option value="claude-opus-5-5">claude-opus-5-5 (정확, 느림)</option><option value="claude-sonnet-5-5">claude-sonnet-5-5 (빠름)</option></select></div>
         <div data-for="helper"><div class="row"><input type="text" id="h-url" value="http://127.0.0.1:8787" style="flex:1"><button class="btn" id="h-check">연결 확인</button></div><div class="hint">PC에서 <code>python -m clausetower serve --llm claude-code</code>(구독) 또는 <code>--llm openai</code>(사내 LLM)를 띄운다.</div></div>
         <div data-for="custom"><select id="c-proto"><option value="openai">OpenAI 호환 (chat/completions + tools)</option><option value="anthropic">Anthropic 호환 (v1/messages)</option></select><input type="text" id="c-url" placeholder="기본 주소 https://llm.company.local/v1" style="margin-top:6px"><input type="text" id="c-model" placeholder="모델 이름" style="margin-top:6px"><input type="password" id="c-key" placeholder="토큰(선택) · Bearer 또는 x-api-key" style="margin-top:6px"><div class="hint">게이트웨이가 CORS를 허용해야 한다. 막히면 로컬 도우미로 중계한다.</div></div>
+        <label class="hint" style="display:flex;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" id="k-remember" style="width:auto">API 키·사내 토큰을 이 브라우저에 기억(localStorage. 같은 출처 namojo.github.io의 다른 페이지와 저장소를 공유한다)</label>
         <div class="out" id="k-status">연결 전</div></div>
       <div class="step"><h3><span class="no">2</span>계약서 올리기 → 조건 추출 → 시뮬레이션에 추가</h3>
         <input type="text" id="u-name" placeholder="고객 이름(예: 새벽물산)"><input type="file" id="u-file" accept=".txt,.md,.docx"><div class="hint">txt, md, docx 또는 아래에 붙여넣기. 지체상금·유예·상한·불가항력 조항이 있는 부분이면 충분하다.</div>
@@ -120,7 +159,7 @@ HTML = """<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name=
 </main></div>
 <div class="scrim" id="scrim"></div><aside class="drawer" id="drawer" aria-label="계약 상세"><div class="dh"><div><b id="drawer-title"></b><div class="hint" id="drawer-sub" style="font-size:12.5px;color:var(--ink-3)"></div></div><span class="spacer" style="flex:1"></span><button class="btn ghost" id="drawer-close">닫기 ✕</button></div><div class="db" id="drawer-body"></div></aside>
 <div class="tip" id="tip"></div><footer id="foot"></footer>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js" defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js" integrity="sha512-sG5Q7boJL+ft/weuz6Mmi9XBD+bEzE9AI2FMP4YMFxp3FpTFUQSQQm5K5cSgJCyed6bWs3W8f8h0lp36lHXhQA==" crossorigin="anonymous" referrerpolicy="no-referrer" defer></script>
 <script src="data.js"></script><script src="engine.js"></script><script src="render.js"></script><script src="app.js"></script></body></html>
 """
 

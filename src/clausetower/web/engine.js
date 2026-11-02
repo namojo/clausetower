@@ -111,10 +111,14 @@
   }
 
   function mulberry32(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
-  function searchBestOrder(scenario, shipments, ctx, { restarts = 6, sweeps = 2, seed = 0, start = null } = {}) {
+  // Fisher–Yates. 비교자 기반 셔플(sort(() => rng() - 0.5))은 정렬 구현마다 결과가 달라 브라우저 간 결정성이 깨진다.
+  function shuffled(arr, rng) { const a = arr.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+  // order가 주어지면(파이썬이 미리 찾은 탐색 결과) 탐색하지 않고 그 순서로 돌린다. 기본 설정의 웹 값이 문서·파이썬 값과 같아진다.
+  function searchBestOrder(scenario, shipments, ctx, { restarts = 6, sweeps = 2, seed = 0, start = null, order: fixed = null } = {}) {
     const rng = mulberry32(seed + 1); const ids = shipments.map(s => s.id); const evaluate = order => runPolicy(scenario, shipments, ctx, 'deadline_first', order).total_penalty_krw;
+    if (fixed && fixed.length === ids.length && ids.every(id => fixed.includes(id))) { const res = runPolicy(scenario, shipments, ctx, 'deadline_first', fixed); res.policy = 'search_best'; res.label = '탐색 근사 최적(참고)'; res.precomputed = true; return res; }
     let bestOrder = start ? start.slice() : ids.slice().sort(); let best = evaluate(bestOrder);
-    for (let r = 0; r < restarts; r++) { const order = r === 0 ? bestOrder.slice() : ids.slice().sort(() => rng() - 0.5); let cur = evaluate(order);
+    for (let r = 0; r < restarts; r++) { const order = r === 0 ? bestOrder.slice() : shuffled(ids, rng); let cur = evaluate(order);
       for (let s = 0; s < sweeps; s++) { let improved = false; for (let i = 0; i < order.length - 1; i++) { for (const j of [i + 1, Math.floor(rng() * order.length)]) { if (j === i) continue; [order[i], order[j]] = [order[j], order[i]]; const v = evaluate(order); if (v < cur) { cur = v; improved = true; } else [order[i], order[j]] = [order[j], order[i]]; } } if (!improved) break; }
       if (cur < best) { best = cur; bestOrder = order.slice(); } }
     const res = runPolicy(scenario, shipments, ctx, 'deadline_first', bestOrder); res.policy = 'search_best'; res.label = '탐색 근사 최적(참고)'; return res;
@@ -123,7 +127,8 @@
   // ---------- 순위표와 보고서 ----------
   function rankingAt(ctx, shipments, scenario, customers, t, ids) {
     const set = new Set(ids); const waiting = shipments.filter(s => set.has(s.id)); const d = scenario.disruption;
-    const n = scenario.trucks - ((d.trucks_out_from_h <= t && t < d.trucks_out_until_h) ? (d.trucks_out || 0) : 0); const avgCycle = 2 * avgRoute / Math.max(1, n);
+    // 보류 기간(한 사이클)은 정책(runPolicy)과 같은 식으로 잡는다(파이썬 agent.ranking_at과 동일)
+    const n = scenario.trucks - ((d.trucks_out_from_h <= t && t < d.trucks_out_until_h) ? (d.trucks_out || 0) : 0); const avgCycle = 2 * avgRoute / Math.max(1, scenario.trucks - (d.trucks_out || 0));
     const state = { t, free_trucks: n, waiting, avg_cycle_h: avgCycle, decisions: {} };
     const rows = waiting.map(s => { const [n0, l, b] = marginalExposure(state, ctx, s); const occ = 2 * travelTime(scenario, s.route, t); return { s, n: n0, l, b, score: (l - n0) / occ }; });
     const byDeadline = sortBy(rows, r => [r.s.due_h, r.s.id]), byExposure = sortBy(rows, r => [-r.score, -r.l, r.s.due_h, r.s.id]);
@@ -133,11 +138,13 @@
   }
 
   // 불가항력 최종 판단을 조건 결합으로 다시 만든다. LLM의 사유·포섭 판단은 두고 통지 시점과 사실만 현재 설정으로 바꾼다.
+  // 계약의 정성 조건(fm.conditions)은 사실 → 모델 판단 순으로 보고, 둘 다 없으면 미충족이다(fail-closed, 파이썬 extract.conditions_satisfied와 동일).
   function deriveJudgment(base, terms, event, override) {
     const j = Object.assign({}, base, { conditions_met: Object.assign({}, base.conditions_met || {}) }); const fm = terms.force_majeure;
     if (j.has_clause && fm) { j.notice_ok = fm.notice_hours == null ? true : (event.notice_sent_after_hours != null && event.notice_sent_after_hours <= fm.notice_hours);
       for (const c of fm.conditions || []) if (event.facts && c in event.facts) j.conditions_met[c] = !!event.facts[c]; }
-    const derived = !!(j.has_clause && j.event_covered && j.notice_ok && Object.values(j.conditions_met).every(Boolean));
+    const condsOk = !fm || (fm.conditions || []).every(c => !!j.conditions_met[c]);
+    const derived = !!(j.has_clause && j.event_covered && j.notice_ok && Object.values(j.conditions_met).every(Boolean) && condsOk);
     j.applies = override == null ? derived : !!override; j.derived_applies = derived; j.manual_override = override != null; return j;
   }
 

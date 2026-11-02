@@ -12,9 +12,9 @@
 | 문제 | 교란 때 마감 임박 순으로 배차하면, 면책·통지 시한·유예·상한·사유 불문 조항 때문에 정작 배상이 발생하는 화물이 뒤로 밀리고 받을 수 있던 면책을 놓친다 |
 | 해법 | LLM이 계약을 읽고 면책을 판단 → 결정적 코드가 노출액을 계산 → 시뮬레이터가 정책을 비교해 증명 → 조치 보드가 지금 할 일을 띄운다 |
 | 결과(측정) | 같은 화물·같은 교란에서 순서만 바꿔 총 배상금 **58~77% 절감**(시나리오 3종), 시드 30개 × 3종에서 **90/90 승** |
-| 실제 모델(측정, 2회 실행) | Claude가 계약서 8부를 읽은 추출 정확도 **95.3~96.2%**(106항목), 면책 판단 태풍 **100%** · 항만 적체 **93.8~96.9%**, 인용 원문 일치 **100%**, 1회 실행당 호출 24회 약 $2 |
+| 실제 모델(측정, 2회 실행) | Claude가 계약서 8부를 읽은 추출 정확도 **95.3~96.2%**(106항목), 면책 판단 필드 정확도 태풍 **100%** · 항만 적체 **93.8~96.9%**(32필드), 고객 단위 최종 적용 여부는 태풍 8/8 · 항만 적체 6/8~7/8(7/8은 1회차·당시 결합 규칙 기준), 인용 원문 일치 **100%**, 1회 실행당 호출 24회 약 $2 |
 | 근거 | 모든 판단에 계약서 **조항 번호와 원문 인용**이 붙고, 한 번의 클릭으로 그 문장이 열린다 |
-| 돌려 보기 | `pip install -e .` 뒤 `python -m clausetower demo --llm mock` → `out/demo/dashboard.html` (네트워크 불필요, 10초) |
+| 돌려 보기 | `pip install -e .` 뒤 `python -m clausetower demo --llm mock` → `out/demo/dashboard.html` (네트워크 불필요, 시나리오 3종 1분 이내. 측정 PC 36.3초). Windows·사내망은 [설치·실행 가이드](docs/setup-guide.md) |
 
 **차례**
 
@@ -78,13 +78,13 @@
 
 ### 3-1. 관제 요약과 지금 조치
 
-맨 위에 두 숫자가 있다. 기존(마감 임박 순) 12,834,000원 대 ClauseTower 2,996,500원, 절감 76.7%. 우선순위 지역 탐색이 찾은 근사 최적은 2,921,000원이라 단순 규칙이 상한선의 97%에 닿는다.
+맨 위에 두 숫자가 있다. 기존(마감 임박 순) 12,834,000원 대 ClauseTower 2,996,500원, 절감 76.7%. 우선순위 지역 탐색이 찾은 근사 최적은 2,921,000원이라, 단순 규칙이 근사 최적보다 75,500원(2.6%) 많은 데까지 따라간다. 기존 대비 줄일 수 있는 금액으로 보면 99.2%를 확보한다.
 
 숫자 바로 아래가 **조치 보드**다. ① 우선 배차 대상 3건(한 사이클 보류 시 추가 배상액이 큰 순), ② 면책 사유에는 해당하는데 통지 시한이 걸린 계약과 놓쳤을 때의 금액, ③ 입증 자료 같은 정성 조건 하나로 성립하는 면책과 그 금액. 하단에 "통지·요건 충족으로 회피 가능한 배상금"과 "배차로만 절감"의 합계가 붙는다. 모든 항목에 "조항 보기"가 있다.
 
 ![관제 요약과 지금 조치](docs/screenshots/typhoon_kpi.png)
 
-웹 데모에서는 조치 보드의 **"통지 12h로 시뮬레이션"**, **"충족으로 바꿔 보기"** 버튼이 왼쪽 패널 값을 바꿔 전체를 그 가정으로 다시 계산한다. "그랬다면 얼마가 달라졌나"를 숫자로 바로 본다.
+웹 데모에서는 조치 보드의 **"통지 12h로 시뮬레이션"**, **"충족으로 바꿔 보기"** 버튼이 왼쪽 패널 값을 바꿔 전체를 그 가정으로 다시 계산한다. "그랬다면 얼마가 달라졌나"를 숫자로 바로 본다. 버튼과 금액은 그 가정으로 면책이 실제로 성립할 때만 나온다. 웹의 기본 출처(실제 Claude 추출)에서는 모델이 세움건설의 "서면 통지"를 정성 조건으로도 적었기 때문에 통지 시각만 바꿔서는 면책이 서지 않는다. 그래서 통지 버튼 대신 "통지 외 조건 미충족이라 통지만으로는 면책 안 됨"이 뜬다. 아래 스크린샷은 이 판정을 넣기 전에 찍어 지금 화면과 다를 수 있다.
 
 ![웹 데모의 조치 보드](docs/screenshots/web/web_actions.png)
 
@@ -104,15 +104,15 @@
 
 ![근거 펼침](docs/screenshots/typhoon_ranking_open.png)
 
-### 3-3. 누적 배상금와 정책 비교
+### 3-3. 누적 배상금과 정책 비교
 
-기존 곡선은 +24시간 이후 가파르게 오르고 ClauseTower는 +36시간에서 멈춘다. 오른쪽은 같은 화물·같은 교란에서 순서만 다른 정책 6개의 총 배상금이다. 고액 화물 순은 17,610,500원으로 가장 나쁘다. **화물가액이 아니라 배상 노출액이 순서를 정한다.**
+기존 곡선은 +24시간 이후 가파르게 오르고 ClauseTower는 +41시간 무렵에서 멈춘다. 오른쪽은 같은 화물·같은 교란에서 순서만 다른 정책 5개와 탐색 근사 최적(참고)의 총 배상금이다. 고액 화물 순은 17,610,500원으로 가장 나쁘다. **화물가액이 아니라 배상 노출액이 순서를 정한다.**
 
 ![누적 곡선과 정책 비교](docs/screenshots/typhoon_charts.png)
 
 ### 3-4. 계약 케이스: 카드와 비교표
 
-고객 8곳의 계약 조건을 항목 격자로 보여 준다. 과금 방식, 유예, 상한(막대), 기준금액, 불가항력 사유 칩, 통지 시한, 정성 조건, 이번 사건의 판단과 이유, 정책별 배상금이 한 카드에 고정 위치로 있다. 한빛전자·바로유통·누리에너지는 면책 적용으로 0원. 두루물산은 면책 조항이 없고 상한도 없어 배상금이 가장 크지만, 순서를 바꿔 278만 원이 75만 원으로 줄었다.
+고객 8곳의 계약 조건을 항목 격자로 보여 준다. 과금 방식, 유예, 상한(막대), 기준금액, 불가항력 사유 칩, 통지 시한, 정성 조건, 이번 사건의 판단과 이유, 정책별 배상금이 한 카드에 고정 위치로 있다. 한빛전자·바로유통·누리에너지는 면책 적용으로 0원. 두루물산은 면책도 상한도 없어 배상금이 지연 시간에 비례해 계속 누적되지만, 순서를 바꿔 278만 원이 75만 원으로 줄었다.
 
 ![계약 케이스 카드](docs/screenshots/typhoon_board.png)
 
@@ -140,7 +140,7 @@
 
 ### 3-7. 웹 데모: 조건을 바꿔 가며 본다
 
-https://namojo.github.io/clausetower/ 는 서버가 없는 정적 페이지다. 파이썬 계산기와 시뮬레이터를 JavaScript로 옮겼고(`src/clausetower/web/engine.js`), 같은 입력에서 파이썬과 같은 총 배상금이 나오는지 `scripts/verify_engine.js`가 31개 항목을 대조한다(전부 일치).
+https://namojo.github.io/clausetower/ 는 서버가 없는 정적 페이지다. 파이썬 계산기와 시뮬레이터를 JavaScript로 옮겼고(`src/clausetower/web/engine.js`), 같은 입력에서 파이썬과 같은 총 배상금이 나오는지 `scripts/verify_engine.js`가 36개 항목을 대조한다(전부 일치). 조작 패널 입력 75케이스에서도 정책별 총액·고객별 금액·순위표가 파이썬과 같은지 시험(`tests/test_web.py`)이 확인한다. 탐색 근사 최적은 기본 설정이면 파이썬이 출처별로 찾아 둔 순서를 그대로 돌린다. 출처를 정답지로 두면 6절 표와 같은 값이 나온다. 기본 출처는 실제 Claude 추출이라, 항만 적체 탭의 첫 화면은 `eval/results/real/report_port_congestion.json` 값(기존 8,925,000원, 탐색 근사 최적 2,607,000원)을 보여 준다. 태풍은 두 출처의 탐색 값이 같고(2,921,000원), WMS 장애는 실제 모델 결과가 없어 정답지로 계산한다. 패널 설정을 바꾸면 브라우저가 더 가볍게 다시 탐색한 참고값이라 문서 표와 다를 수 있다.
 
 왼쪽 고정 패널에서 바꿀 수 있는 것:
 
@@ -159,13 +159,15 @@ https://namojo.github.io/clausetower/ 는 서버가 없는 정적 페이지다. 
 
 ![계약서 업로드와 추출](docs/screenshots/web/web_live_upload.png)
 
-연결 방식은 세 가지다. 계약서 본문은 선택한 LLM 엔드포인트 외에는 어디에도 전송되지 않고, 키는 브라우저 localStorage에만 남는다.
+연결 방식은 세 가지다. 계약서 본문은 선택한 LLM 엔드포인트 외에는 어디에도 전송되지 않는다. 키와 토큰은 기본으로 이 탭(sessionStorage)에만 두어 탭을 닫으면 지워지고, "이 브라우저에 기억"을 켰을 때만 localStorage에 남는다(같은 출처의 다른 페이지와 공유되므로 개인용 키를 권한다).
 
 | 연결 방식 | 준비 | 흐름 |
 | --- | --- | --- |
 | Anthropic API 키 | 키를 입력 | 브라우저 → api.anthropic.com 직접 호출(tool use로 구조화 출력) |
 | 로컬 도우미(Claude 구독, Claude Code CLI) | PC에서 `python -m clausetower serve --llm claude-code` | 브라우저 → 127.0.0.1:8787 → 기존 `llm.py`가 CLI로 처리. 사내 LLM 중계도 같은 경로(`--llm openai`) |
 | 사내·호환 엔드포인트 | 기본 주소, 모델 이름, 토큰 입력 | 브라우저 → OpenAI 호환(`/chat/completions` + tools) 또는 Anthropic 호환(`/v1/messages`) 직접 호출. CORS가 막히면 도우미로 중계 |
+
+로컬 도우미는 기본으로 `127.0.0.1`에만 바인딩하고, 허용한 웹 출처(`https://namojo.github.io`, 포트와 무관한 `http://localhost`·`http://127.0.0.1`·`http://[::1]`)의 요청만 받는다. 출처는 `serve --allow-origin`(여러 번 가능)이나 `CLAUSETOWER_ALLOWED_ORIGINS`(쉼표 구분)로 더한다. 목록 밖 출처는 403, JSON이 아닌 POST는 415, 동시 요청 초과는 429로 거절한다. `--host`를 루프백 밖으로 두면 인증 없이 같은 네트워크에 LLM 연결이 열리므로 경고를 낸다. 실제 모델 호출이 실패해 자리표시자가 돌아오면 응답에 `fallback: true`가 붙고 웹은 그 결과를 쓰지 않는다. 설정과 문제 해결은 [설치·실행 가이드](docs/setup-guide.md)에 있다.
 
 로컬 도우미를 Claude 구독으로 띄우고 예시 계약서를 올린 실제 실행이다. 추출에 22초가 걸렸고 요율·유예·상한·면책 사유·통지 시한을 모두 맞게 읽었으며 인용은 원문과 일치했다.
 
@@ -185,7 +187,7 @@ https://namojo.github.io/clausetower/ 는 서버가 없는 정적 페이지다. 
 
 ### 3-10. 실제 Claude가 읽은 결과
 
-위 화면은 계약 조건에 정답지를 쓴 것이다(mock 모드). 실제 Claude(claude-opus-5-5)가 계약서 8부를 읽은 결과로 그린 화면은 다음과 같다. 카드 오른쪽 위의 "읽기 N%"가 모델이 보고한 확신도다. 통지 요건을 정성 조건으로도 한 번 더 적은 것 외에는 정답지와 같고, 태풍 시나리오의 총 배상금은 두 번의 실행 모두 정답지와 완전히 같다.
+위 화면은 계약 조건에 정답지를 쓴 것이다(mock 모드). 실제 Claude(claude-opus-5-5)가 계약서 8부를 읽은 결과로 그린 화면은 다음과 같다. 카드 오른쪽 위의 "읽기 N%"가 모델이 보고한 확신도다. 면책의 정성 조건과 열거 사유를 일부 다르게 나눠 적은 것(6절) 외에는 정답지와 같고, 태풍 시나리오의 총 배상금은 두 번의 실행 모두 정답지와 완전히 같다.
 
 ![실제 모델이 읽은 계약 케이스](docs/screenshots/real/typhoon_board.png)
 
@@ -236,8 +238,9 @@ agent.py: 위를 묶어 Report(JSON) ─▶ dashboard.py(단일 HTML, 오프라�
 ### 5-2. 계약 읽기와 면책 판단(LLM)
 
 - **구조화 출력.** `prompts/extract.md`와 pydantic 스키마 `PenaltyTerms`로 추출한다. 항목별 `citations`(조항 번호 + 원문 인용)와 `confidence`, `ambiguities`를 함께 받는다. 인용이 계약서에 글자 그대로 있는지 코드가 확인한다.
-- **면책 판단.** `prompts/judge.md`로 사건 설명 × 계약 조항을 대조해 `has_clause`, `event_covered`, `notice_ok`, `conditions_met{조건: 충족}`을 받는다. 최종 `applies`는 모델 값을 버리고 네 조건의 논리곱으로 다시 만든다. 통지 시점이나 사실 관계가 바뀌면 LLM을 다시 부르지 않고 이 결합만 다시 계산한다.
-- **보수적으로 틀리게.** 애매하면 배상금을 잡는 쪽으로 판단하도록 프롬프트했다. 실제 모델 측정에서 갈린 1건(항만 적체의 누리에너지)이 이 방향으로 틀렸다.
+- **면책 판단.** `prompts/judge.md`로 사건 설명 × 계약 조항을 대조해 `has_clause`, `event_covered`, `notice_ok`, `conditions_met{조건: 충족}`을 받는다. 최종 `applies`는 모델 값을 버리고 네 조건의 논리곱으로 다시 만든다. 모델이 답을 빠뜨린 정성 조건은 미충족으로 본다. 통지 시점이나 사실 관계가 바뀌면 LLM을 다시 부르지 않고 이 결합만 다시 계산한다.
+- **보수적으로 틀리게.** 애매하면 배상금을 잡는 쪽으로 판단하도록 프롬프트했다. 실제 모델 측정에서 판단이 갈린 건(1회차 1건, 2회차 2건, 모두 항만 적체)이 전부 이 방향으로 틀렸다.
+- **계약서 속 지시는 따르지 않는다.** 계약서 본문은 `<contract>`로 감싸 넘기고, 그 안에 적힌 지시는 따르지 않고 `ambiguities`·`reasoning`에 적도록 두 프롬프트에 규칙을 두었다. 이 규칙은 실제 모델 측정(6절) 뒤에 추가했다.
 
 ### 5-3. 노출액 계산기(결정적 코드)
 
@@ -249,7 +252,7 @@ agent.py: 위를 묶어 Report(JSON) ─▶ dashboard.py(단일 HTML, 오프라�
 4. 요율 × 기준금액(건별 화물가액 또는 월 서비스료), 누진이면 구간별 합, 정액이면 건당 금액(가중 정액 포함).
 5. 건별 상한을 적용하고, 고객·기간 합계 상한은 시뮬레이션 안에서 누적으로 적용한다.
 
-"즉시 배차 시"과 "한 사이클 보류 시"을 각각 계산해 그 차이를 배상 노출액으로 쓴다.
+"즉시 배차 시"와 "한 사이클 보류 시"를 각각 계산해 그 차이를 배상 노출액으로 쓴다.
 
 ### 5-4. 배차 정책과 시뮬레이터
 
@@ -266,7 +269,7 @@ agent.py: 위를 묶어 Report(JSON) ─▶ dashboard.py(단일 HTML, 오프라�
 
 ### 5-5. LLM 연결 방식
 
-파이썬 파이프라인의 LLM 호출은 `llm.py` 한 곳을 지나며 모드는 네 가지다. 기본 `auto`는 API 키 → 사내 엔드포인트 설정 → Claude Code CLI → mock 순으로 고른다. 호출은 스레드 풀로 병렬이고(기본 4) 실패하면 정답지로 대체한 뒤 횟수를 보고서에 남긴다.
+파이썬 파이프라인의 LLM 호출은 `llm.py` 한 곳을 지나며 모드는 네 가지다. 기본 `auto`는 API 키 → 사내 엔드포인트 설정 → Claude Code CLI → mock 순으로 고르고, `--llm`을 생략했는데 실제 LLM이 골라지면 비용 경고를 낸다. 호출은 스레드 풀로 병렬이고(기본 4, `CLAUSETOWER_CONCURRENCY`) 실패하면 정답지로 대체한 뒤 횟수를 보고서(`llm_fallbacks`)에 남긴다. 환경 변수 전체는 [설치·실행 가이드](docs/setup-guide.md)에 있다.
 
 | 모드 | 무엇 | 언제 |
 | --- | --- | --- |
@@ -275,7 +278,7 @@ agent.py: 위를 묶어 Report(JSON) ─▶ dashboard.py(단일 HTML, 오프라�
 | `anthropic` | Anthropic SDK | `ANTHROPIC_API_KEY`가 있을 때 |
 | `openai` | OpenAI 호환 chat/completions + 강제 tool call | 사내 LLM(`CLAUSETOWER_OPENAI_BASE_URL`, `CLAUSETOWER_OPENAI_API_KEY`, `CLAUSETOWER_MODEL`) |
 
-웹 데모의 세 연결 방식(API 키 직접, 로컬 도우미, 사내·호환 엔드포인트)은 3-8절에 있다. 로컬 도우미(`server.py`)는 `/extract`와 `/judge` 두 엔드포인트로 위 `llm.py`를 그대로 쓰며 계약 본문을 기록하지 않는다.
+웹 데모의 세 연결 방식(API 키 직접, 로컬 도우미, 사내·호환 엔드포인트)은 3-8절에 있다. 로컬 도우미(`server.py`)는 `/extract`와 `/judge` 두 엔드포인트로 위 `llm.py`를 그대로 쓰며 계약 본문을 기록하지 않는다(로그에는 메서드와 경로만 남는다).
 
 ---
 
@@ -296,7 +299,7 @@ agent.py: 위를 묶어 Report(JSON) ─▶ dashboard.py(단일 HTML, 오프라�
 | 가온헬스케어 | 7,500,000 | 500,000 | 건당 위약금이 정액이라 보류 즉시 배상이 발생한다. 배상 순위 2위로 올려 배차했다 |
 | 두루물산 | 2,784,000 | 754,000 | 면책도 상한도 없는 시간당 요율. 매 시간 배상금이 누적된다 |
 | 청람제약 | 1,215,000 | 841,500 | 입증 조건 미충족으로 면책 불가. 입증 자료만 있으면 0원 |
-| 세움건설 | 909,000 | 570,000 | 12h 통지를 놓쳐 면책 불가. 시한을 지켰다면 0원 |
+| 세움건설 | 909,000 | 570,000 | 12h 통지를 놓쳐 면책 불가. 시한을 지켰다면 0원(정답지 기준. 실제 Claude 추출은 서면 통지 등을 정성 조건으로도 적어 통지 시각만으로는 0원이 되지 않는다) |
 | 미래식품 | 426,000 | 331,000 | 태풍이 면책 사유에 없음. 누진 요율 |
 | 한빛전자·바로유통·누리에너지 | 0 | 0 | 면책 적용 |
 
@@ -307,15 +310,20 @@ agent.py: 위를 묶어 Report(JSON) ─▶ dashboard.py(단일 HTML, 오프라�
 | 항목 | 1회차 | 2회차(현재) |
 | --- | --- | --- |
 | 계약 조건 추출 정확도(8부, 106항목) | 96.2% (102/106) | 95.3% (101/106) |
-| 틀린 항목의 성격 | 전부 면책의 정성 조건 개수. 통지 요건을 조건으로도 한 번 더 적음 | 같음. 누리에너지는 열거 사유 5개 중 4개로 읽음("등"으로 묶인 표현). 금액 계산에 영향 없음 |
-| 면책 판단 정확도(32항목) | 태풍 100%, 항만 적체 96.9% | 태풍 100%, 항만 적체 93.8% |
+| 틀린 항목의 성격 | 4항목. 면책의 정성 조건 개수 3건(세움건설·바로유통·누리에너지가 통지 등 요건을 조건으로도 적음), 누리에너지의 열거 사유 5개 중 4개(포괄 사유를 조건 쪽에 적음) | 5항목. 1회차의 4항목에 더해 한빛전자 열거 사유 8개 중 7개("폭설 등 천재지변"을 한 사유로 묶음). 과금 방식·요율·유예·상한 같은 금액 항목은 두 회차 모두 전부 일치 |
+| 면책 판단 필드 정확도(32필드: 고객 8곳 × 조항 있음·사유 해당·통지 충족·최종 적용) | 태풍 100%, 항만 적체 96.9% | 태풍 100%, 항만 적체 93.8% |
+| 최종 적용 여부 정확도(고객 8곳) | 태풍 8/8, 항만 적체 7/8(당시 결합 규칙 기준, 지금 규칙으로는 6/8) | 태풍 8/8, 항만 적체 6/8 |
 | 판단이 갈린 건 | 항만 적체의 누리에너지 1건을 보수적으로 면책 보류 | 누리에너지에 더해 세움건설 1건. "서면" 통지 여부가 사건 설명에 없어 조건 미충족으로 보류. 둘 다 배상금을 잡는 쪽으로 틀림 |
-| 인용 원문 일치율 | 100% | 100% |
+| 인용 원문 일치율(고객 8곳) | 100% | 100% |
 | 태풍 시나리오 정책 비교 | 정답지와 동일(12,834,000 → 2,996,500) | 동일 |
-| 호출·비용·시간 | 24회, $1.98, 270초 | 24회, $2.06, 283초(4개 병렬), mock 대체 0회 |
+| 호출·비용·시간 | 24회, $1.98, 호출 시간 합계 270초, 실제 소요 약 85초 | 24회, $2.06, 호출 시간 합계 283초, 병렬 4개로 실제 소요 약 101초, mock 대체 0회 |
 | 웹 데모 구독 경로 | 예시 계약서 추출 22초, 조건 전부 정확, 인용 원문 일치 | – |
 
-두 번 모두 같은 종류로 틀렸다. 모델은 통지 요건을 정성 조건으로 한 번 더 적고, 애매한 면책은 보류한다. 둘 다 프롬프트가 요구한 보수적 방향이며, 화면에는 "조건 미충족"과 그 이유가 그대로 드러나 사람이 확인한다.
+틀린 곳은 추출과 판단으로 나눠 봐야 한다. **추출 쪽은 프롬프트 지시를 어겼다.** `prompts/extract.md`는 "통지 시한과 정성 조건을 분리해 적는다"고 지시하지만, 모델은 세움건설·바로유통·누리에너지의 통지 등 요건을 정성 조건으로 한 번 더 적었다. 사유를 나누는 방식도 틀렸다. 누리에너지는 포괄 사유를 조건 쪽으로 옮겨 적었고(열거 사유 5개 중 4개), 2회차 한빛전자는 열거 사유를 묶어 적었다(8개 중 7개). **판단 쪽은 프롬프트대로 보수적이었다.** `prompts/judge.md` 4번 "사실이 없으면 충족하지 않은 것으로 본다"에 따라, 사실이 주어지지 않은 조건은 미충족으로 보고 면책을 보류했다. 항만 적체에서 갈린 두 건은 추출이 조건으로 옮겨 적은 요건(누리에너지의 "합리적으로 통제할 수 없는 사유", 세움건설의 "서면" 통지)이 이 규칙에 걸린 경우다. 화면에는 "조건 미충족"과 그 이유가 그대로 드러나 사람이 확인한다.
+
+지표 정의는 다음과 같다(`eval/run_eval.py`, 상세는 [평가 방법](docs/evaluation.md)). 판단 필드 정확도는 고객마다 네 필드를 따로 센 값이라, 고객 단위로 면책 결론을 맞힌 비율인 최종 적용 여부 정확도보다 높게 나온다. 인용 원문 일치율은 인용 첫 조각의 앞 20자가 계약서에 있는 고객의 비율이고, 조각 전체가 그대로 있어야 하는 엄격 기준(`citations_strict_rate`)으로도 두 회차 모두 100%다. 실제 소요 시간은 `run.log`의 시나리오별 경과 시간 합이다. 1회차 보고서는 정책 정의를 바꾼 뒤 `demo --from-reports … --resim`으로 시뮬레이션만 다시 돌렸기 때문에 `real_prev/run.log`의 정책 이름·총액과 다르다. LLM 결과는 같다([`eval/results/real/README.md`](eval/results/real/README.md)).
+
+**프롬프트 변경 이력.** ① 2회차 전: 추출 프롬프트의 "지연 페널티 조건"을 "지연 배상 조건"으로. ② 2회차 뒤: `prompts/extract.md`·`prompts/judge.md`에 계약서 속 지시를 따르지 않는 규칙을 넣고 본문을 `<contract>`로 감쌌다. 위 실제 모델 수치는 ② 전 프롬프트로 잰 값이며, ② 뒤로는 다시 재지 않았다. ③ 2회차 뒤(2026-11-02): 판단에서 빠진 조건을 미충족으로 보는 조건 결합 규칙(fail-closed)을 코드에 넣었다. 지금 규칙으로 1회차 보고서를 다시 결합하면 세움건설의 `conditions_met` 키가 조건 문구와 글자가 달라 미적용이 되므로, 1회차 항만 적체 최종 적용 여부는 7/8에서 6/8이 된다. 표의 1회차 7/8은 당시 결합 규칙 기준이다.
 
 ---
 
@@ -325,7 +333,7 @@ agent.py: 위를 묶어 Report(JSON) ─▶ dashboard.py(단일 HTML, 오프라�
 
 - **있다.** SLA 마감 긴급도를 가중치로 쓰는 [현장서비스 배차](https://fieldcode.com/en/field-service-daily/how-ai-supports-sla-aware-scheduling), SLA 배상금을 비용 함수에 넣는 [클라우드 스케줄링 연구](https://arxiv.org/pdf/2505.12355), 계약서에서 배상금 조항을 분류·추출하는 [특허](https://image-ppubs.uspto.gov/dirsearch-public/print/downloadPdf/11755973), SLA 위반을 예측해 재배차를 트리거한다는 [물류 벤더 자료](https://oxmaint.com/industries/delivery-operations-management/ai-improve-sla-performance-delivery-operations).
 - **못 찾았다.** 계약서 **조항의 구조**(요율 단위, 유예, 상한, 불가항력의 열거·포괄 표현, 통지 시한, 입증 조건)를 읽어 사건별 **실제 노출액**으로 바꾸고, 그 값으로 운영 배차를 바꾸며, 모든 판단에 원문을 인용하는 것. 한국어 지체상금 맥락에서는 관련 자료 자체가 없었다.
-- 차별점을 한 문장으로: **"마감 긴급도"가 아니라 "계약이 실제로 배상 노출액"으로 배차하고, 그 돈의 근거를 조항 원문으로 보여 준다.**
+- 차별점을 한 문장으로: **"마감 긴급도"가 아니라 "계약에서 실제로 발생하는 배상 노출액"으로 배차하고, 그 돈의 근거를 조항 원문으로 보여 준다.**
 
 ---
 
@@ -333,28 +341,31 @@ agent.py: 위를 묶어 Report(JSON) ─▶ dashboard.py(단일 HTML, 오프라�
 
 ```bash
 cd clausetower
-python -m venv .venv && . .venv/bin/activate      # Windows: .venv\Scripts\activate
-pip install -e ".[dev]"
+python -m venv .venv && . .venv/bin/activate      # Windows PowerShell은 docs/setup-guide.md
+pip install -e ".[dev]"                           # 편집 설치 필수(계약서·시나리오·프롬프트가 저장소 루트에 있다)
 python -m clausetower demo --llm mock             # 3개 시나리오 실행 + out/demo/dashboard.html (네트워크 불필요)
 python -m clausetower run typhoon --llm mock      # 하나만
 python -m clausetower serve --llm claude-code     # 웹 데모용 로컬 도우미(Claude 구독). --llm openai 로 사내 LLM
 python scripts/build_site.py                      # 웹 데모를 site/에 조립
 ```
 
+**Windows·사내망.** PowerShell 명령, 사내 프록시에서 `NO_PROXY`에 `127.0.0.1,localhost` 추가, 콘솔 한글 출력용 `PYTHONUTF8=1`, Playwright 설치는 [설치·실행 가이드](docs/setup-guide.md)에 있다. 편집 설치가 아니면 `CLAUSETOWER_ROOT`에 저장소 경로를 지정해야 한다.
+
 실제 Claude로 돌리려면 `--llm claude-code`(구독), `--llm anthropic`(API 키), `--llm openai`(사내 LLM) 중 하나를 고른다(5-5절). 계약 추출은 시나리오 간에 공유되어 호출은 8 + 시나리오당 8회다.
 
-**검증 절차(심사용).** 모든 숫자는 아래 명령으로 다시 나온다.
+**검증 절차(심사용).** 모든 숫자는 아래 명령으로 다시 나온다. 추적 중인 측정 파일(`eval/results/`)을 덮어쓰는 명령은 없다.
 
 ```bash
-pytest -q                                              # 39 passed
-python -m clausetower demo --llm mock                  # 6절 표의 숫자가 그대로 나온다(결정적)
-python eval/run_eval.py robustness --seeds 30          # 90/90 승, 평균 절감률
-python eval/run_eval.py extraction eval/results/real/report_typhoon.json   # 실제 모델 결과 채점(저장된 보고서)
-python scripts/build_site.py && node scripts/verify_engine.js              # 웹 엔진 31/31 일치
-node scripts/smoke_web.js site/index.html /tmp/shots                       # 브라우저 스모크(Playwright, API는 가짜 응답)
+pytest -q                                              # 71 passed
+python -m clausetower demo --llm mock                  # 6절 표의 숫자가 그대로 나온다(결정적). 엔진 대조의 입력도 된다
+python eval/run_eval.py robustness --seeds 30 --out out/eval   # 90/90 승. 추적 결과 eval/results/robustness.md와 같은 숫자
+python eval/run_eval.py extraction eval/results/real/report_typhoon.json   # 실제 모델 결과 채점(저장된 보고서, 화면 출력만)
+python scripts/build_site.py && node scripts/verify_engine.js              # 웹 엔진 36/36 일치
+npm i --no-save playwright@1.64.1 && npx playwright install chromium        # 브라우저 스모크 준비(처음 한 번. node_modules/는 .gitignore 대상. 저장소 밖 설치는 setup-guide)
+node scripts/smoke_web.js site/index.html out/shots                        # 브라우저 스모크(API는 가짜 응답)
 ```
 
-mock 모드에서 추출 정확도 100%는 정답지를 그대로 쓰기 때문이며 의미가 없다. 실제 모델 수치는 저장된 보고서(`eval/results/real/`)와 실행 로그(`run.log`)로 확인한다.
+mock 모드에서 추출 정확도 100%는 정답지를 그대로 쓰기 때문이며 의미가 없다. 실제 모델 수치는 저장된 보고서(`eval/results/real/`)와 실행 로그(`run.log`)로 확인한다. 브라우저 스모크는 CI에 없고 로컬에서만 돈다. 지표 정의와 재현 방법의 상세는 [평가 방법](docs/evaluation.md)에 있다.
 
 ---
 
@@ -370,17 +381,17 @@ clausetower/
 │   ├── sim.py         배송 네트워크 시뮬레이터, 정책 5개, 우선순위 지역 탐색
 │   ├── agent.py       파이프라인과 '배상 노출 순위' 표, 재시뮬레이션
 │   ├── dashboard.py   단일 HTML 대시보드(인라인 SVG, 오프라인)
-│   ├── server.py      웹 데모용 로컬 도우미(/extract, /judge, CORS)
+│   ├── server.py      웹 데모용 로컬 도우미(/extract, /judge, 허용 출처 CORS)
 │   ├── web/           engine.js(계산기·시뮬레이터 이식), render.js(공용 렌더: 조치 보드·보드·서랍·차트), app.js(조작 패널·라이브 AI), style.css
 │   └── cli.py         run | demo | serve | eval
 ├── contracts/         가상 계약서 8부(.md)와 정답지(golden/*.yaml)
 ├── scenarios/         교란 3종(태풍, 항만 적체, 자사 WMS 장애)
 ├── prompts/           extract.md, judge.md
 ├── eval/              run_eval.py(robustness, extraction), results/(측정값, 실제 모델 보고서)
-├── tests/             39개
-├── scripts/           build_site.py(웹 데모 조립), verify_engine.js(JS≡Python 검증), smoke_web.js(브라우저 스모크), real_run.py, screenshot.js
-├── .github/workflows/ pages.yml(테스트 → 조립 → 검증 → gh-pages 배포)
-└── docs/              proposal.md(기획서), ax-hackathon-form.md(양식 답안), demo-script.md(3분 대본), screenshots/
+├── tests/             시험 71개(pytest 기준)
+├── scripts/           build_site.py(웹 데모 조립), verify_engine.js·verify_engine_panel.js(JS≡Python 검증), smoke_web.js(브라우저 스모크), real_run.py, screenshot.js
+├── .github/workflows/ pages.yml(main 푸시·PR마다 테스트 → mock 데모 → 조립 → 엔진 검증, main 푸시만 gh-pages 배포)
+└── docs/              proposal.md(기획서), ax-hackathon-form.md(양식 답안), demo-script.md(3분 대본), setup-guide.md, architecture.md, evaluation.md, judge-qa.md, hackathon-plan.md, screenshots/
 ```
 
 **설계 원칙**
@@ -401,7 +412,7 @@ clausetower/
 
 - 시뮬레이터는 작은 모형이다(허브 1, 노선 8, 트럭 8, 화물 56, 건당 1적재). 절감률은 이 모형 안의 값이고 실제 네트워크 수치가 아니다.
 - 계약서와 정답지를 같은 팀이 만들었다. 실제 계약서 블라인드 평가가 필요하다. 한국어 계약서만 다뤘다.
-- 실제 모델 측정은 2개 시나리오 2회 실행이다. 두 번의 차이(추출 1항목, 판단 1건)가 모델 분산의 크기를 짐작하게 하지만 통계로 말하기에는 적다.
+- 실제 모델 측정은 2개 시나리오 2회 실행이다. 두 번의 차이(추출 1항목, 판단 1건)가 모델 분산의 크기를 짐작하게 하지만 통계로 말하기에는 적다. 또 이 측정은 프롬프트에 계약서 속 지시를 따르지 않는 규칙을 넣기 전에 잰 값이다.
 - 탐색 근사 최적은 지역 탐색이며 진짜 최적이 아니다.
 - 교란 동시 발생, 부분 적재, 환적은 없다.
 - 웹 데모는 정적 페이지라 LLM 호출에 사용자의 키나 로컬 도우미가 필요하다. 업로드 계약의 화물 7건은 가상으로 만든다. PDF와 HWP 업로드는 아직 없다(텍스트로 붙여넣기).
@@ -421,15 +432,21 @@ clausetower/
 | 기준 | 어디서 확인하나 |
 | --- | --- |
 | AI 활용 수준 | LLM은 **읽기와 판단**(계약 조항 구조화, 불가항력 적용 여부)만 맡고 돈 계산은 코드가 한다. 구조화 출력(pydantic), 조건의 기계적 결합, 인용 검증, 실패 시 정답지 대체와 기록. `src/clausetower/extract.py`, `prompts/` |
-| 문제 해결 방식 | "긴급도"이 아니라 "배상 노출액"으로 우선순위를 바꾸는 한 가지 변경. 같은 시뮬레이터에서 정책 5개를 나란히 비교하고 지역 탐색 상한선까지 둔다. `src/clausetower/sim.py` |
+| 문제 해결 방식 | "긴급도"가 아니라 "배상 노출액"으로 우선순위를 바꾸는 한 가지 변경. 같은 시뮬레이터에서 정책 5개를 나란히 비교하고 지역 탐색 상한선까지 둔다. `src/clausetower/sim.py` |
 | 실제 업무 적용 가능성 | 기존 배차 엔진을 바꾸지 않고 우선순위 입력에 열 하나를 더하는 형태. 사건 직후 조치 보드. 모든 판단에 원문 인용. 사람이 최종 결정. 사내 LLM·구독·API 키 모두 지원 |
-| 재현성 | 결정적 시뮬레이터, mock 모드, 시험 39개, 실제 모델 실행 보고서와 로그 2회분, JS≡Python 검증, 브라우저 스모크. 8절 "검증 절차" |
+| 재현성 | 결정적 시뮬레이터, mock 모드, 시험 71개, 실제 모델 실행 보고서와 로그 2회분, JS≡Python 검증(36/36, 조작 패널 입력 75케이스), 브라우저 스모크. 8절 "검증 절차" |
 
 **문서**
 
 - [기획서 전문](docs/proposal.md) — 문제, 통찰, 데모 장면 7개, 견고성, 실제 모델 결과, 화면 설계 원칙, 아키텍처, 사업 연결, 위험과 대응
 - [AX해커톤 아이디어 기획서 양식 답안](docs/ax-hackathon-form.md) — 7개 문항
-- [3분 데모 대본](docs/demo-script.md)
+- [3분 데모 대본](docs/demo-script.md) — 준비, 시각표, 실패 대비
+- [설치·실행 가이드](docs/setup-guide.md) — macOS·Linux·Windows 설치, LLM 모드와 환경 변수, 로컬 도우미 보안, 문제 해결
+- [아키텍처](docs/architecture.md) — 구성 요소, 데이터 흐름, 노출액 계산 예시, 웹 엔진 경로
+- [평가 방법](docs/evaluation.md) — 지표 정의, 실제 모델 1·2회차, 다중 시드, 엔진 대조, 재현 명령, 타당성 위협
+- [심사 예상 질문](docs/judge-qa.md) — 심사 기준별 질문과 근거 있는 답
+- [2일 구현 계획](docs/hackathon-plan.md) — 출발점과 해커톤 이틀의 작업 목록
+- 실제 모델 결과 폴더 설명: [`eval/results/real/README.md`](eval/results/real/README.md)
 - 화면: `docs/screenshots/`(mock), `docs/screenshots/real/`(실제 모델), `docs/screenshots/web/`(웹 데모)
 
-**배포.** `main`에 푸시하면 GitHub Actions가 테스트, 사이트 조립, 엔진 검증을 거쳐 `gh-pages` 브랜치로 배포한다(`.github/workflows/pages.yml`).
+**배포.** `main` 푸시와 PR마다 GitHub Actions가 테스트, mock 데모, 사이트 조립, 엔진 검증을 돌린다. `main` 푸시일 때만 검증을 통과한 산출물을 별도 job이 `gh-pages` 브랜치로 배포한다(`.github/workflows/pages.yml`).

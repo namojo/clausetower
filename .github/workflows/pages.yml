@@ -3,16 +3,25 @@ name: Deploy web demo to GitHub Pages
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch:
 
+# 기본 권한은 읽기만. 쓰기는 배포 job에만 준다.
 permissions:
-  contents: write
+  contents: read
+
+# 같은 브랜치의 실행이 겹치면 앞의 실행을 취소한다(gh-pages 동시 배포 방지)
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  deploy:
+  verify:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -25,9 +34,30 @@ jobs:
         run: pytest -q
       - name: Build site and verify engine against Python
         run: |
-          CLAUSETOWER_LLM=mock python -m clausetower demo --out out/demo
+          CLAUSETOWER_LLM=mock python -m clausetower demo --llm mock --out out/demo
           python scripts/build_site.py
           node scripts/verify_engine.js
+      - name: Upload site
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: site
+          path: site
+          include-hidden-files: true   # .nojekyll
+          retention-days: 1
+
+  # 시험·검증이 통과한 산출물만 배포한다. 이 job은 저장소 코드를 실행하지 않는다.
+  deploy:
+    needs: verify
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: site
+          path: site
       - name: Publish to gh-pages
         uses: peaceiris/actions-gh-pages@v4
         with:

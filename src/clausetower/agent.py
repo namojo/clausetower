@@ -23,7 +23,8 @@ def ranking_at(ctx: Context, shipments, scenario, customers: dict[str, Customer]
     from .sim import ROUTES, travel_time
     waiting = [s for s in shipments if s.id in set(ids)]
     n = scenario.trucks - (scenario.disruption.trucks_out if scenario.disruption.trucks_out_from_h <= t < scenario.disruption.trucks_out_until_h else 0)
-    avg_cycle = 2 * sum(ROUTES.values()) / len(ROUTES) / max(1, n)
+    # 보류 기간(한 사이클)은 정책(run_policy)과 같은 식으로 잡는다. 결항이 끝난 시점이어도 정책은 결항 트럭을 뺀 사이클로 판단한다.
+    avg_cycle = 2 * sum(ROUTES.values()) / len(ROUTES) / max(1, scenario.trucks - scenario.disruption.trucks_out)
     state = State(t=t, free_trucks=n, waiting=waiting, avg_cycle_h=avg_cycle)
     rows = []
     for s in waiting:
@@ -99,7 +100,7 @@ def run(scenario_id: str, *, llm: LLM | None = None, with_search: bool = True,
                      + (f", 대체 {llm.usage.fallbacks}회" if llm.usage.fallbacks else ""))
     return Report(scenario=scenario, customers=customers, terms=terms, extraction=extractions, judgments=judgments,
                   ranking=ranking, ranking_at_h=base_run.peak_queue_h, policies=results, savings_vs_deadline_krw=savings, savings_vs_deadline_pct=round(pct, 1),
-                  llm_mode=llm.mode, llm_calls=llm.usage.calls, generated_at=datetime.now(), agent_log=agent_log)
+                  llm_mode=llm.mode, llm_calls=llm.usage.calls, llm_fallbacks=llm.usage.fallbacks, generated_at=datetime.now(), agent_log=agent_log)
 
 
 def resimulate(report: Report, *, with_search: bool = True) -> Report:

@@ -193,5 +193,6 @@ class Report(BaseModel):
     savings_vs_deadline_pct: float
     llm_mode: str
     llm_calls: int
+    llm_fallbacks: int = Field(default=0, description="LLM 호출이 실패해 정답지·자리표시자로 대체한 횟수. 0이 아니면 '실제 모델 결과'가 아닌 값이 섞여 있다")
     generated_at: datetime
     agent_log: list[str] = Field(default_factory=list)

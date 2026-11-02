@@ -30,19 +30,23 @@
     for (const c of customers) { const o = state.overrides[c.id]; const j = CT.deriveJudgment(baseJudgment(src, c.id), terms[c.id], scenario.event, o ? o.applies : null); if (o && o.reason) j.reasoning = '사람 결정: ' + o.reason + ' (원래 판단: ' + j.reasoning + ')'; judgments[c.id] = j; }
     let shipments = S.shipments_by_seed[state.seed].slice(); state.extra.forEach(x => shipments = shipments.concat(x.shipments)); shipments.sort((a, b) => a.ready_h - b.ready_h || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
     const label = D.sources[src].label + (state.extra.length ? ` + 업로드 ${state.extra.length}건(라이브 AI)` : '') + (state.live ? ' + 사건 재판단(라이브 AI)' : '');
-    return CT.buildReport({ scenario, customers, terms, extraction, judgments, shipments, llm_mode: label, withSearch: state.search, searchOpts: { restarts: 6, sweeps: 2 } });
+    return CT.buildReport({ scenario, customers, terms, extraction, judgments, shipments, llm_mode: label, withSearch: state.search, searchOpts: { restarts: 6, sweeps: 2, order: precomputedOrder(src) } });
   }
+  // 기본 설정(배치 A, 패널 기본값, 사람 결정·업로드·재판단 없음)이면 파이썬이 찾은 탐색 순서를 그대로 쓴다. 문서 표와 같은 값이 나온다.
+  function isDefaultSetup() { return state.seed === 'A' && !state.extra.length && !state.live && !state.manualEvent && !Object.keys(state.overrides).length && JSON.stringify(state.params) === JSON.stringify(defaults(scen().scenario)); }
+  function precomputedOrder(src) { const sb = scen().search_best; return isDefaultSetup() && sb && sb[src] ? sb[src].order : null; }
 
   function renderControls() {
     const S = scen().scenario; const p = state.params; const d = S.disruption; const src = currentSource(); const conds = new Set();
     for (const t of Object.values(allTerms(src))) for (const c of (t.force_majeure ? t.force_majeure.conditions : [])) conds.add(c);
+    const effective = new Set(conds);  // 이 출처의 계약 조건 문구와 같은 키만 자동 판단(조건 결합)에 반영된다
     Object.keys(S.event.facts || {}).forEach(k => conds.add(k)); Object.keys(p.facts || {}).forEach(k => conds.add(k));
     const ev = state.manualEvent || {};
     $('#panel-event').innerHTML = `
       <div class="ctl"><b>사건 유형</b><input type="text" id="m-type" value="${esc(ev.event_type ?? S.event.event_type)}"></div>
       <div class="ctl"><b>무슨 일이 있었나</b><textarea id="m-desc" rows="3">${esc(ev.description ?? S.event.description)}</textarea><span class="hint">직접 고쳐 쓸 수 있다. 면책 판단은 아래에서 손으로 정하거나, ③에서 AI에 맡긴다.</span></div>
       <div class="ctl"><b>고객 통지 시점 <span class="val" id="v-notice"></span></b><input type="range" id="c-notice" min="-1" max="48" step="1" value="${p.notice == null ? -1 : p.notice}"><span class="hint">통지 시한이 있는 면책 조항에 바로 반영된다.</span></div>
-      ${[...conds].map(c => `<label class="switch"><span>${esc(c)}</span><input type="checkbox" data-fact="${esc(c)}" ${p.facts[c] ? 'checked' : ''}></label>`).join('')}`;
+      ${[...conds].map(c => `<label class="switch"${effective.has(c) ? '' : ' title="이 출처의 계약 조건 문구와 달라 자동 판단에는 반영되지 않는다. ③ AI 재판단에는 사실로 함께 보낸다."'}><span>${esc(c)}${effective.has(c) ? '' : '<br><small class="hint">이 출처의 계약 조건 문구와 달라 자동 판단에는 반영 안 됨(AI 재판단에는 전달)</small>'}</span><input type="checkbox" data-fact="${esc(c)}" ${p.facts[c] ? 'checked' : ''}></label>`).join('')}`;
     $('#panel-ops').innerHTML = `
       <div class="ctl"><b>트럭 수 <span class="val" id="v-trucks"></span></b><input type="range" id="c-trucks" min="4" max="12" step="1" value="${p.trucks}"></div>
       <div class="ctl"><b>결항 트럭 수 <span class="val" id="v-out"></span></b><input type="range" id="c-out" min="0" max="8" step="1" value="${p.trucks_out}"></div>
@@ -68,7 +72,7 @@
     $('#c-reset').onclick = () => { resetParams(); refresh(true); };
     $('#tabs').innerHTML = D.scenarios.map(s2 => `<button class="tab ${s2.scenario.id === state.sid ? 'on' : ''}" data-id="${s2.scenario.id}">${s2.scenario.title}</button>`).join('');
     document.querySelectorAll('nav.tabs .tab').forEach(t => t.addEventListener('click', () => { state.sid = t.dataset.id; state.live = null; state.manualEvent = null; resetParams(); refresh(true); }));
-    $('#clegend').innerHTML = allCustomers().map((c, i) => `<span><i style="background:var(--c${(i % 8) + 1})"></i>${c.name}</span>`).join('');
+    $('#clegend').innerHTML = allCustomers().map((c, i) => `<span><i style="background:var(--c${(i % 8) + 1})"></i>${esc(c.name)}</span>`).join('');
   }
 
   // 고객별 면책 판단을 사람이 직접 정한다: 자동(조건 결합) | 적용 | 미적용 + 이유
@@ -95,8 +99,10 @@
     const src = currentSource();
     const changed = Object.entries(R.judgments).filter(([cid, j]) => { const b = (scen().judgments[src] || {})[cid]; return j.manual_override || (b && b.applies !== j.applies); });
     $('#src-note').innerHTML = `<span class="chip tower">계약 읽기 · ${D.sources[src].label}</span>` + (state.extra.length ? `<span class="chip warn">업로드 고객 ${state.extra.length}</span>` : '') + (state.live ? '<span class="chip warn">AI 재판단 적용</span>' : '') + (state.manualEvent ? '<span class="chip">사건 직접 입력</span>' : '') +
-      (changed.length ? `<span class="chip hot">판단 달라짐 · ${changed.map(([cid, j]) => R.customers.find(c => c.id === cid).name).join(', ')}</span>` : '');
-    $('#search-note').textContent = state.search ? '탐색 완료. 설정을 바꾸면 다시 계산해야 한다.' : '';
+      (changed.length ? `<span class="chip hot">판단 달라짐 · ${esc(changed.map(([cid, j]) => R.customers.find(c => c.id === cid).name).join(', '))}</span>` : '');
+    const sb = R.policies.search_best;
+    $('#search-note').textContent = !state.search ? '' : sb && sb.precomputed ? '기본 설정이라 파이썬 탐색 결과(문서 표와 같은 값)를 그대로 보여 준다. 설정을 바꾸면 다시 계산해야 한다.'
+      : '설정이 기본값과 달라 브라우저에서 다시 찾은 참고값이다(문서 표와 다를 수 있다). 설정을 바꾸면 다시 계산해야 한다.';
     $('#btn-search').disabled = state.search;
   }
   $('#btn-search').addEventListener('click', () => { $('#search-note').textContent = '탐색 중…'; setTimeout(() => { state.search = true; refresh(); }, 30); });
@@ -107,7 +113,7 @@
       const notice = ev.notice_sent_after_hours != null ? `운영팀은 사건 발생 ${ev.notice_sent_after_hours}시간 뒤에 고객에게 통지했다.` : '운영팀은 고객에게 통지하지 않았다.';
       const facts = Object.entries(ev.facts || {}).map(([k, v]) => `- ${k}: ${v ? '예' : '아니오'}`).join('\n') || '- (추가 사실 없음)';
       const clause = terms.force_majeure ? `추출된 불가항력 조항: 사유 ${JSON.stringify(terms.force_majeure.covered_events)}, 통지 시한 ${terms.force_majeure.notice_hours}시간, 조건 ${JSON.stringify(terms.force_majeure.conditions || [])}` : '추출 결과: 불가항력 조항 없음';
-      return `고객 ID: ${cid}\n\n--- 사건 ---\n유형: ${ev.event_type}\n설명: ${ev.description}\n${notice}\n사실 관계:\n${facts}\n\n${clause}\n\n--- 계약서 전문 ---\n${text}`;
+      return `고객 ID: ${cid}\n\n--- 사건 ---\n유형: ${ev.event_type}\n설명: ${ev.description}\n${notice}\n사실 관계:\n${facts}\n\n${clause}\n\n${contractBlock(text)}`;
     },
     addCustomer(customer, terms, extraction, judgment, shipments) { state.extra.push({ customer, terms, extraction, judgment, shipments, text: $('#u-text').value }); refresh(true); },
     clearExtra() { state.extra = []; refresh(true); },
@@ -120,10 +126,20 @@
   resetParams(); refresh(true);
 })();
 
+// 계약서 전문을 데이터 경계로 감싼다(파이썬 extract.contract_block과 같은 형식). 프롬프트는 이 안의 지시를 따르지 않는다.
+function contractBlock(text) { return `--- 계약서 전문 ---\n<contract>\n${text}\n</contract>`; }
+
 // ---------------- 실제 케이스 분석(AI). 연결 방식 셋: API 키 직접 / 로컬 도우미(구독·사내 중계) / 사내·호환 엔드포인트 ----------------
 (function () {
   const D = window.CT_DATA; const $ = s => document.querySelector(s);
-  const store = { get: k => localStorage.getItem('clausetower.' + k) || '', set: (k, v) => v ? localStorage.setItem('clausetower.' + k, v) : localStorage.removeItem('clausetower.' + k) };
+  // 키·토큰은 기본으로 이 탭(sessionStorage)에만 둔다. "기억"을 켰을 때만 localStorage에 남긴다.
+  // localStorage는 같은 출처(https://namojo.github.io)의 다른 페이지와 공유되기 때문이다. 주소·모델 같은 설정은 localStorage에 둔다.
+  const P = 'clausetower.', SECRET = new Set(['anthropic_key', 'custom_key']);
+  const remember = () => localStorage.getItem(P + 'remember_keys') === '1';
+  const store = {
+    get: k => (SECRET.has(k) ? sessionStorage.getItem(P + k) || localStorage.getItem(P + k) : localStorage.getItem(P + k)) || '',
+    set: (k, v) => { (SECRET.has(k) ? [sessionStorage, localStorage] : [localStorage]).forEach(a => a.removeItem(P + k)); if (v) (SECRET.has(k) && !remember() ? sessionStorage : localStorage).setItem(P + k, v); } };
+  const rem = $('#k-remember'); if (rem) { rem.checked = remember(); rem.addEventListener('change', e => { if (e.target.checked) localStorage.setItem(P + 'remember_keys', '1'); else localStorage.removeItem(P + 'remember_keys'); for (const k of SECRET) store.set(k, store.get(k)); }); }
   const HELP = { api: '본인의 Anthropic API 키로 이 브라우저가 api.anthropic.com을 직접 호출한다. 서버를 거치지 않는다.',
     helper: '브라우저는 Claude 구독(CLI)을 직접 못 쓴다. PC에서 도우미를 띄우면 도우미가 기존 파이프라인(llm.py)으로 처리한다. 사내 LLM도 도우미가 중계할 수 있다.',
     custom: 'OpenAI 호환 또는 Anthropic 호환 사내 게이트웨이를 브라우저에서 직접 호출한다. 도구 호출(tool use)로 구조화 출력을 받는다.' };
@@ -132,8 +148,8 @@
   $('#k-backend').value = store.get('backend') || 'api'; $('#k-backend').addEventListener('change', showBackend); showBackend();
   const masked = v => v ? '••••••••' + v.slice(-4) : '';
   $('#k-key').value = masked(store.get('anthropic_key'));
-  $('#k-save').onclick = () => { const v = $('#k-key').value.trim(); if (v && !v.startsWith('•')) { store.set('anthropic_key', v); $('#k-key').value = masked(v); status('API 키 저장됨(이 브라우저에만)', true); } };
-  $('#k-clear').onclick = () => { store.set('anthropic_key', ''); $('#k-key').value = ''; status('키 지움.'); };
+  $('#k-save').onclick = () => { const v = $('#k-key').value.trim(); if (v && !v.startsWith('•')) { store.set('anthropic_key', v); $('#k-key').value = masked(v); status(remember() ? 'API 키 저장됨(이 브라우저에 기억)' : 'API 키 저장됨(이 탭에만, 닫으면 지워짐)', true); } };
+  $('#k-clear').onclick = () => { store.set('anthropic_key', ''); store.set('custom_key', ''); $('#k-key').value = ''; $('#c-key').value = ''; status('API 키와 사내 토큰을 이 브라우저에서 지움.'); };
   $('#h-url').value = store.get('helper_url') || 'http://127.0.0.1:8787'; $('#h-url').addEventListener('change', e => store.set('helper_url', e.target.value.trim()));
   $('#c-url').value = store.get('custom_url'); $('#c-model').value = store.get('custom_model'); $('#c-proto').value = store.get('custom_proto') || 'openai'; $('#c-key').value = masked(store.get('custom_key'));
   for (const [id, k] of [['c-url', 'custom_url'], ['c-model', 'custom_model'], ['c-proto', 'custom_proto']]) $('#' + id).addEventListener('change', e => store.set(k, e.target.value.trim()));
@@ -173,7 +189,26 @@
   }
   const backendLabel = () => ({ api: 'Anthropic API(' + $('#k-model').value + ')', helper: '로컬 도우미', custom: '사내 엔드포인트(' + (store.get('custom_model') || '?') + ')' })[backend()];
 
-  const verbatim = (quote, text) => { const head = (quote || '').split('…')[0].trim().slice(0, 20); return !!head && text.includes(head); };
+  // 인용 검사: '…'(생략)·' / '(이어 붙임)로 나뉜 조각 하나하나가 통째로 원문에 있어야 한다. 줄바꿈·연속 공백 차이만 무시한다(eval/run_eval.py quote_is_verbatim과 같은 규칙).
+  const normWs = s => String(s || '').replace(/\s+/g, ' ').trim();
+  const verbatim = (quote, text) => { const body = normWs(text); const parts = String(quote || '').split(/…|\s\/\s/).map(normWs).filter(Boolean); return parts.length > 0 && parts.every(p => body.includes(p)); };
+  // 직접 호출(API 키·사내 엔드포인트)은 스키마 검증 없이 모델 출력을 받는다. 화면에 넣기 전에 형식을 강제하고, 기본값 필드를 채운다.
+  const num = v => (v == null || v === '' || !Number.isFinite(Number(v))) ? null : Number(v);
+  function normalizeTerms(terms, id) {
+    if (!terms || typeof terms !== 'object') throw new Error('조건(terms)이 없다');
+    if (!Object.prototype.hasOwnProperty.call(BASIS, terms.basis)) throw new Error('알 수 없는 과금 방식(basis)이다. 추가하지 않았다.');
+    terms.customer_id = id; terms.citations = (terms.citations && typeof terms.citations === 'object') ? terms.citations : {}; terms.tiers = Array.isArray(terms.tiers) ? terms.tiers : [];
+    for (const k of ['rate_pct', 'cap_pct', 'cap_amount_krw', 'base_amount_krw', 'flat_amount_krw']) terms[k] = num(terms[k]);
+    terms.grace_hours = num(terms.grace_hours) || 0;
+    terms.base = Object.prototype.hasOwnProperty.call(BASE, terms.base) ? terms.base : 'shipment_value';
+    terms.cap_scope = terms.cap_scope === 'customer_period' ? 'customer_period' : 'shipment';
+    if (terms.partial_unit_rounds_up == null) terms.partial_unit_rounds_up = true;
+    terms.tiers = terms.tiers.map(z => ({ from_day: num(z.from_day) || 1, to_day: num(z.to_day), rate_pct: num(z.rate_pct) || 0 }));
+    if (terms.flat_escalation) terms.flat_escalation = { after_hours: num(terms.flat_escalation.after_hours) || 0, amount_krw: num(terms.flat_escalation.amount_krw) || 0 };
+    const fm = terms.force_majeure;
+    if (fm) { fm.notice_hours = num(fm.notice_hours); fm.covered_events = Array.isArray(fm.covered_events) ? fm.covered_events.map(String) : []; fm.conditions = Array.isArray(fm.conditions) ? fm.conditions.map(String) : []; fm.citation = fm.citation || { clause: '', quote: '' }; }
+    return terms;
+  }
   const nextId = () => { const ids = new Set(window.CT_APP.customers().map(c => c.id)); for (const ch of 'IJKLMNOPQRSTUVWXYZ') if (!ids.has(ch)) return ch; return 'Z'; };
   function mulberry(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
   function makeShipments(id, name, count = 7) { let h = 7; for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) | 0; const rng = mulberry(h); const routes = Object.keys(CT.ROUTES); const out = [];
@@ -194,16 +229,21 @@
     if (text.length < 80) { out.textContent = '계약서 본문이 너무 짧다.'; return; }
     const id = nextId(); out.textContent = `계약서를 읽는 중… (${backendLabel()}, 수십 초)`; $('#u-run').disabled = true;
     try {
-      const t0 = Date.now(); const exi = await callLLM('extract', { customer_id: id, text }, { system: D.prompts.extract, user: `고객 ID: ${id}\n\n--- 계약서 전문 ---\n${text}`, schema: D.schemas.extract, toolName: 'submit_extraction' }); const ex = { input: exi };
-      const terms = ex.input.terms; terms.customer_id = id; terms.citations = terms.citations || {}; terms.tiers = terms.tiers || []; terms.grace_hours = terms.grace_hours || 0;
-      const bad = Object.entries(terms.citations).filter(([, c]) => !verbatim(c.quote, text)).map(([k]) => k); if (terms.force_majeure && !verbatim(terms.force_majeure.citation.quote, text)) bad.push('force_majeure');
+      const t0 = Date.now(); const exi = await callLLM('extract', { customer_id: id, text }, { system: D.prompts.extract, user: `고객 ID: ${id}\n\n${contractBlock(text)}`, schema: D.schemas.extract, toolName: 'submit_extraction' }); const ex = { input: exi };
+      if (exi && exi.fallback) throw new Error('도우미의 실제 모델 호출이 실패해 자리표시자 조건이 돌아왔다. 고객을 추가하지 않았다(도우미 터미널의 로그를 확인하라).');
+      const terms = normalizeTerms(ex.input.terms, id); const confidence = Math.min(1, Math.max(0, num(ex.input.confidence) || 0));
+      const bad = Object.entries(terms.citations).filter(([, c]) => !verbatim(c && c.quote, text)).map(([k]) => k); if (terms.force_majeure && !verbatim(terms.force_majeure.citation.quote, text)) bad.push('force_majeure');
       const app = window.CT_APP; const ev = app.currentEvent(); const sid = app.state.sid;
+      const shipments = makeShipments(id, name);
+      try { CT.computePenalty(terms, { shipmentId: shipments[0].id, delayHours: 30, shipmentValue: shipments[0].value_krw, dueAt: new Date(), judgment: null }); }
+      catch (e) { throw new Error('추출한 조건으로 배상금을 계산할 수 없다(' + e.message + '). 고객을 추가하지 않았다.'); }
       out.textContent = `조건 추출 완료(${((Date.now() - t0) / 1000).toFixed(0)}초). 이제 현재 사건에 대한 면책을 판단하는 중…`;
       const judgeUser = app.judgeUserText(id, terms, ev, text);
       const j = await callLLM('judge', { customer_id: id, terms, event: ev, text }, { system: D.prompts.judge, user: judgeUser, schema: D.schemas.judge, toolName: 'submit_judgment' }); j.customer_id = id; j.conditions_met = j.conditions_met || {};
-      app.addCustomer({ id, name, segment: '업로드', monthly_fee_krw: terms.base === 'monthly_fee' ? terms.base_amount_krw : null }, terms, { terms, confidence: ex.input.confidence, ambiguities: ex.input.ambiguities || [] }, j, makeShipments(id, name));
-      out.innerHTML = `<b>${name}</b>(${id})을 추가했다. ${terms.basis} · 요율 ${terms.rate_pct ?? '-'}% · 유예 ${terms.grace_hours}h · ${terms.cap_pct != null ? '상한 ' + terms.cap_pct + '%' : terms.cap_amount_krw != null ? '상한 ' + terms.cap_amount_krw.toLocaleString() + '원' : '상한 없음'} · ${terms.force_majeure ? '면책 조항 있음' : '면책 조항 없음'}. 확신도 ${(ex.input.confidence * 100).toFixed(0)}%. ` +
-        (bad.length ? `<span style="color:var(--crit)">인용 ${bad.join(', ')}이(가) 원문과 글자 그대로 일치하지 않는다. 카드에서 확인하라.</span>` : '인용은 모두 원문과 일치한다.') + ` 화물 7건을 만들어 시뮬레이션에 넣었다. 아래 표에서 ${id}로 시작하는 화물을 찾아보라.`;
+      if (j.fallback) throw new Error('도우미의 실제 모델 호출이 실패해 자리표시자 판단이 돌아왔다. 고객을 추가하지 않았다(도우미 터미널의 로그를 확인하라).');
+      app.addCustomer({ id, name, segment: '업로드', monthly_fee_krw: terms.base === 'monthly_fee' ? terms.base_amount_krw : null }, terms, { terms, confidence, ambiguities: Array.isArray(ex.input.ambiguities) ? ex.input.ambiguities.map(String) : [] }, j, shipments);
+      out.innerHTML = `<b>${esc(name)}</b>(${id})을 추가했다. ${esc(BASIS[terms.basis])} · 요율 ${terms.rate_pct ?? '-'}% · 유예 ${terms.grace_hours}h · ${terms.cap_pct != null ? '상한 ' + terms.cap_pct + '%' : terms.cap_amount_krw != null ? '상한 ' + terms.cap_amount_krw.toLocaleString() + '원' : '상한 없음'} · ${terms.force_majeure ? '면책 조항 있음' : '면책 조항 없음'}. 확신도 ${(confidence * 100).toFixed(0)}%. ` +
+        (bad.length ? `<span style="color:var(--crit)">인용 ${esc(bad.join(', '))}이(가) 원문과 글자 그대로 일치하지 않는다. 카드에서 확인하라.</span>` : '인용은 모두 원문과 일치한다.') + ` 화물 7건을 만들어 시뮬레이션에 넣었다. 아래 표에서 ${id}로 시작하는 화물을 찾아보라.`;
     } catch (err) { out.textContent = '실패: ' + err.message + (String(err.message).includes('Failed to fetch') ? ' (브라우저가 직접 호출을 막았거나 네트워크 문제. 키와 네트워크를 확인하라.)' : ''); }
     finally { $('#u-run').disabled = false; }
   };
@@ -215,10 +255,10 @@
     out.textContent = `계약 ${custs.length}건의 면책을 판단하는 중… (${backendLabel()}, 병렬 4개)`; $('#e-run').disabled = true;
     try {
       const results = {}; let i = 0; const queue = custs.slice();
-      const worker = async () => { while (queue.length) { const c = queue.shift(); const j = await callLLM('judge', { customer_id: c.id, terms: terms[c.id], event: ev, text: app.contractText(c.id) }, { system: D.prompts.judge, user: app.judgeUserText(c.id, terms[c.id], ev, app.contractText(c.id)), schema: D.schemas.judge, toolName: 'submit_judgment' }); j.customer_id = c.id; j.conditions_met = j.conditions_met || {}; results[c.id] = j; out.textContent = `판단 ${++i}/${custs.length}…`; } };
+      const worker = async () => { while (queue.length) { const c = queue.shift(); const j = await callLLM('judge', { customer_id: c.id, terms: terms[c.id], event: ev, text: app.contractText(c.id) }, { system: D.prompts.judge, user: app.judgeUserText(c.id, terms[c.id], ev, app.contractText(c.id)), schema: D.schemas.judge, toolName: 'submit_judgment' }); if (j.fallback) throw new Error(`${c.name}: 도우미의 실제 모델 호출이 실패해 자리표시자 판단이 돌아왔다. 재판단을 적용하지 않았다(도우미 터미널의 로그를 확인하라).`); j.customer_id = c.id; j.conditions_met = j.conditions_met || {}; results[c.id] = j; out.textContent = `판단 ${++i}/${custs.length}…`; } };
       await Promise.all([worker(), worker(), worker(), worker()]);
       app.setLiveEvent(ev, results);
-      const applied = custs.filter(c => results[c.id].applies).map(c => c.name); out.innerHTML = `사건 '<b>${type}</b>'에 대한 판단 완료. 면책 적용: ${applied.length ? applied.join(', ') : '없음'}. 위 '고객별 결과'와 '계약서 근거' 카드에 각 판단의 이유가 있다. 통지 시점 슬라이더를 움직이면 통지 요건만 다시 계산된다.`;
+      const applied = custs.filter(c => results[c.id].applies).map(c => c.name); out.innerHTML = `사건 '<b>${esc(type)}</b>'에 대한 판단 완료. 면책 적용: ${applied.length ? esc(applied.join(', ')) : '없음'}. 위 '고객별 결과'와 '계약서 근거' 카드에 각 판단의 이유가 있다. 통지 시점 슬라이더를 움직이면 통지 요건만 다시 계산된다.`;
     } catch (err) { out.textContent = '실패: ' + err.message; } finally { $('#e-run').disabled = false; }
   };
   $('#e-reset').onclick = () => { window.CT_APP.clearLiveEvent(); $('#e-out').textContent = '원래 사건의 판단으로 되돌렸다.'; };

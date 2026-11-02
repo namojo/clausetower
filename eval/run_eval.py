@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import statistics
 import sys
 from pathlib import Path
@@ -74,6 +75,8 @@ def _fm_fields(t):
 
 def extraction(report_path: Path) -> dict:
     r = Report.model_validate_json(Path(report_path).read_text(encoding="utf-8"))
+    if r.llm_fallbacks:
+        print(f"경고: 이 보고서는 LLM 실패로 정답지·자리표시자 대체가 {r.llm_fallbacks}회 섞여 있다. 정확도가 실제보다 높게 나온다.", file=sys.stderr)
     rows = []
     total = correct = 0
     jtotal = jcorrect = 0
@@ -98,14 +101,19 @@ def extraction(report_path: Path) -> dict:
         jwrong = {k: v for k, v in jf.items() if v[0] != v[1]}
         jtotal += len(jf)
         jcorrect += len(jf) - len(jwrong)
-        cites_ok = all(c.quote.split("…")[0].strip()[:20] in _contract(cid) for c in got.citations.values()) and \
-            (not got.force_majeure or got.force_majeure.citation.quote.split("…")[0].strip()[:20] in _contract(cid))
-        rows.append({"customer": cid, "fields": len(fields), "wrong": wrong, "judgment_wrong": jwrong, "citations_verbatim": cites_ok,
+        quotes = [c.quote for c in got.citations.values()] + ([got.force_majeure.citation.quote] if got.force_majeure else [])
+        # 기존 지표(문서에 쓰는 '인용 일치율'): 첫 조각의 앞 20자. 정의를 바꾸면 추적 숫자가 달라지므로 그대로 둔다.
+        cites_ok = all(q.split("…")[0].strip()[:20] in _contract(cid) for q in quotes)
+        # 엄격 지표: 조각 전체가 원문에 있어야 한다(앞부분만 맞춘 조작 인용을 걸러 낸다). 팀이 쓴 정답지는 조항 번호를 줄여 적어 1.0이 아니다.
+        cites_strict = all(quote_is_verbatim(q, _contract(cid)) for q in quotes)
+        rows.append({"customer": cid, "fields": len(fields), "wrong": wrong, "judgment_wrong": jwrong, "citations_verbatim": cites_ok, "citations_strict": cites_strict,
                      "confidence": ex.confidence, "ambiguities": ex.ambiguities})
-    summary = {"report": str(report_path), "scenario": r.scenario.id, "llm_mode": r.llm_mode, "term_field_accuracy": round(correct / total, 3),
+    summary = {"report": str(report_path), "scenario": r.scenario.id, "llm_mode": r.llm_mode, "llm_fallbacks": r.llm_fallbacks,
+               "term_field_accuracy": round(correct / total, 3),
                "term_fields": total, "judgment_accuracy": round(jcorrect / jtotal, 3), "judgment_fields": jtotal,
                "applies_accuracy": round(sum(1 for x in rows if "applies" not in x["judgment_wrong"]) / len(rows), 3),
-               "citations_verbatim_rate": round(sum(1 for x in rows if x["citations_verbatim"]) / len(rows), 3), "rows": rows}
+               "citations_verbatim_rate": round(sum(1 for x in rows if x["citations_verbatim"]) / len(rows), 3),
+               "citations_strict_rate": round(sum(1 for x in rows if x["citations_strict"]) / len(rows), 3), "rows": rows}
     print(json.dumps({k: v for k, v in summary.items() if k != "rows"}, ensure_ascii=False, indent=1))
     for x in rows:
         flag = "OK " if not x["wrong"] and not x["judgment_wrong"] else "DIFF"
@@ -116,6 +124,18 @@ def extraction(report_path: Path) -> dict:
         for k, (g, e) in x["judgment_wrong"].items():
             print(f"       {k}: 모델 {g!r} vs 정답 {e!r}")
     return summary
+
+
+def _norm_ws(s: str) -> str:
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def quote_is_verbatim(quote: str, text: str) -> bool:
+    """인용이 원문 그대로인가. '…'(생략)이나 ' / '(문장 이어 붙임)로 나뉜 조각 하나하나가 통째로 원문에 있어야 한다.
+    줄바꿈·연속 공백 차이만 무시한다. 앞 몇 글자만 맞추고 뒤를 꾸민 인용은 통과하지 못한다(웹 app.js verbatim과 같은 규칙)."""
+    body = _norm_ws(text)
+    parts = [_norm_ws(p) for p in re.split(r"…|\s/\s", quote or "") if _norm_ws(p)]
+    return bool(parts) and all(p in body for p in parts)
 
 
 def _ne(a, b) -> bool:

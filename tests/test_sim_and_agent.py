@@ -84,7 +84,7 @@ def test_blocked_shipments_never_charged():
 def test_agent_report_roundtrip_and_story(tmp_path):
     r = run("typhoon", llm=LLM("mock"), with_search=False)
     assert r.llm_mode == "mock" and r.savings_vs_deadline_pct > 0
-    # 핵심 서사: 마감 순위 1~3위 중 불가항력 면책이나 유예로 노출이 0인 화물이 뒤로 밀린다
+    # 핵심 서사: 마감 순위 상위(5위 이내) 화물 중 불가항력 면책이나 유예로 노출이 0인 화물이 3계단 이상 뒤로 밀린다
     assert any(row.deadline_rank <= 5 and row.exposure_rank > row.deadline_rank + 2 for row in r.ranking)
     assert all(row.citations for row in r.ranking if row.penalty_if_deferred_krw > 0)
     js = r.model_dump_json()
@@ -104,3 +104,42 @@ def test_judge_recomputes_applies_mechanically(monkeypatch):
     monkeypatch.setattr(llm, "parse", lambda **kw: bad)
     j = extract.judge_force_majeure(llm, "C", load_golden_terms("C"), load_scenario("typhoon").event, "typhoon")
     assert j.applies is False and "기계적으로" in j.reasoning
+
+
+def test_judge_missing_condition_key_fails_closed(monkeypatch):
+    """계약에 정성 조건이 있는데 모델 판단(conditions_met)이 그 키를 빠뜨리면 충족으로 보지 않는다(fail-closed)."""
+    from clausetower import extract
+    from clausetower.schemas import ForceMajeureJudgment
+
+    terms = load_golden_terms("H")
+    assert terms.force_majeure and terms.force_majeure.conditions, "H는 입증 조건이 걸린 계약이어야 한다"
+    llm = LLM("mock")
+    lax = ForceMajeureJudgment(customer_id="H", has_clause=True, event_covered=True, notice_ok=True, conditions_met={}, applies=True, reasoning="x")
+    monkeypatch.setattr(llm, "parse", lambda **kw: lax)
+    event = load_scenario("port_congestion").event.model_copy(update={"facts": {}})
+    j = extract.judge_from_text(llm, "H", terms, event, "본문")
+    assert j.applies is False and "기계적으로" in j.reasoning
+    # 사실(facts)이 조건을 충족하면 모델이 키를 빠뜨렸어도 면책이 성립한다
+    cond = terms.force_majeure.conditions[0]
+    j2 = extract.judge_from_text(llm, "H", terms, event.model_copy(update={"facts": {c: True for c in terms.force_majeure.conditions}}), "본문")
+    assert j2.applies is True, cond
+
+
+def test_ranking_uses_the_same_hold_cycle_as_the_policy():
+    """결항이 대기열 최대 시점보다 먼저 끝나도 순위표는 정책과 같은 보류 기간(한 사이클)으로 계산한다."""
+    from clausetower.agent import ranking_at
+    from clausetower.sim import ROUTES, State, _exposure_key
+
+    scenario, customers, ctx = make_ctx("typhoon")
+    scenario = scenario.model_copy(update={"disruption": scenario.disruption.model_copy(update={"trucks_out_until_h": 6})})
+    ctx.scenario = scenario
+    ships = build_shipments(scenario, customers)
+    base = run_policy(scenario, ships, ctx, POLICIES["deadline_first"][1], "d", "d")
+    t = base.peak_queue_h
+    assert t >= scenario.disruption.trucks_out_until_h, "이 시험은 결항이 끝난 뒤의 대기열 최대 시점을 다룬다"
+    rows = ranking_at(ctx, ships, scenario, {c.id: c for c in customers}, t, base.peak_queue_ids)
+    cycle = 2 * sum(ROUTES.values()) / len(ROUTES) / max(1, scenario.trucks - scenario.disruption.trucks_out)  # run_policy와 같은 식
+    waiting = [s for s in ships if s.id in set(base.peak_queue_ids)]
+    state = State(t=t, free_trucks=scenario.trucks, waiting=waiting, avg_cycle_h=cycle)
+    policy_order = [s.id for s in sorted(waiting, key=lambda s: _exposure_key(state, ctx, s, per_hour=True))]
+    assert [r.shipment_id for r in rows] == policy_order

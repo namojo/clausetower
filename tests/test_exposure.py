@@ -106,3 +106,46 @@ def test_steps_explain_every_number(daily_terms):
     b = pen(daily_terms, 24 + 30)
     text = " ".join(b.steps)
     assert "유예 24시간" in text and "일당 0.1%" in text and "2일" in text and "상한" in text
+
+
+# ---------- 경계값(웹 engine.js와의 대조는 tests/test_web.py::test_js_compute_penalty_matches_python_on_boundaries) ----------
+BOUNDARY_TERMS = {
+    "tiered": PenaltyTerms(customer_id="D", basis="tiered_per_day", tiers=[Tier(from_day=1, to_day=2, rate_pct=0.1), Tier(from_day=3, rate_pct=0.2)]),
+    "flat": PenaltyTerms(customer_id="E", basis="flat_per_shipment", flat_amount_krw=500_000, flat_escalation=FlatEscalation(after_hours=24, amount_krw=2_000_000)),
+    "bizday_grace": PenaltyTerms(customer_id="F", basis="per_business_day", rate_pct=0.2, grace_hours=24),
+    "period_pct_on_value": PenaltyTerms(customer_id="X", basis="per_hour", rate_pct=1.0, cap_pct=5, cap_scope="customer_period"),
+}
+
+
+def test_delay_exactly_equal_to_grace_is_free(daily_terms):
+    b = pen(daily_terms, 24)
+    assert b.penalty_krw == 0 and b.blocked_by == "유예기간 내"
+
+
+def test_tier_boundary_48h_vs_just_over():
+    t = BOUNDARY_TERMS["tiered"]
+    assert pen(t, 48, value=10_000_000).penalty_krw == 20_000            # 2일: 0.1%×2
+    assert pen(t, 48.01, value=10_000_000).penalty_krw == 40_000         # 3일: 0.1%×2 + 0.2%×1
+
+
+def test_flat_escalation_starts_strictly_after_threshold():
+    t = BOUNDARY_TERMS["flat"]
+    assert pen(t, 24).penalty_krw == 500_000 and pen(t, 24.01).penalty_krw == 2_000_000
+
+
+def test_penalty_equal_to_cap_is_not_marked_capped(daily_terms):
+    b = pen(daily_terms, 24 + 24 * 100)  # 100일 × 0.1% = 10% = 상한과 같음
+    assert b.penalty_krw == 10_000_000 and not b.capped and "이내" in b.steps[-1]
+
+
+def test_business_days_start_after_grace_over_weekend():
+    # 금요일 06:00 마감 + 유예 24h → 토요일 06:00부터 과금. 72h = 토·일·월 → 영업일 1일
+    b = pen(BOUNDARY_TERMS["bizday_grace"], 24 + 72, value=10_000_000, due=FRI)
+    assert b.units == 1 and b.penalty_krw == 20_000
+
+
+def test_customer_period_pct_cap_needs_a_base_amount():
+    """고객 합계 상한이 % 로만 적혀 있고 기준금액이 건별 화물가액이면 합계 상한을 정할 수 없어 적용하지 않는다(현재 규칙 고정)."""
+    t = BOUNDARY_TERMS["period_pct_on_value"]
+    bs = [pen(t, 10, value=10_000_000) for _ in range(3)]
+    assert [b.penalty_krw for b in apply_customer_period_cap(t, bs)] == [1_000_000] * 3

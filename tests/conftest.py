@@ -7,6 +7,10 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 os.environ.setdefault("CLAUSETOWER_LLM", "mock")
+# 사내 프록시(HTTP(S)_PROXY)가 있어도 로컬 서버 시험 요청(127.0.0.1)은 프록시를 거치지 않게 한다. 시험 프로세스 안에서만 바뀐다.
+_no_proxy = ",".join(filter(None, [os.environ.get("NO_PROXY") or os.environ.get("no_proxy") or "", "127.0.0.1,localhost"]))
+for _k in ("NO_PROXY", "no_proxy"):  # Windows는 대소문자를 구분하지 않으므로 같은 값을 두 번 넣어도 중복되지 않는다
+    os.environ[_k] = _no_proxy
 
 from clausetower.schemas import Citation, ForceMajeure, ForceMajeureJudgment, PenaltyTerms  # noqa: E402
 

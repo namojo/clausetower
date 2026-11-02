@@ -1,7 +1,7 @@
 [project]
 name = "clausetower"
 version = "0.1.0"
-description = "ClauseTower — 계약 조항을 읽어 페널티 노출액 순서로 배차하는 물류 관제 에이전트"
+description = "ClauseTower — 계약 조항을 읽어 배상 노출 순으로 배차하는 물류 관제 에이전트"
 requires-python = ">=3.11"
 dependencies = [
   "pydantic>=2.6",
@@ -23,7 +23,8 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [tool.setuptools.package-data]
-clausetower = ["prompts/*.md", "web/*"]
+# 프롬프트·계약서·시나리오는 저장소 루트에 있어 패키지에 들어가지 않는다(편집 설치 전제, contracts.py 참고)
+clausetower = ["web/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
