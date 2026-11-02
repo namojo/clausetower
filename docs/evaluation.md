@@ -215,13 +215,13 @@ pytest -q tests/test_web.py -k panel                            # 조작 패널 
 **실제 모델 재측정(과금, 실행하지 않음).** 2회차 기준 호출 24회, $2.06, 실제 소요 약 101초였다(측정). 결과는 `out/real/<시나리오>/report.json`에 저장되며 추적 폴더를 건드리지 않는다.
 
 ```bash
-CLAUSETOWER_LLM=claude-code python scripts/real_run.py typhoon port_congestion
+CLAUSETOWER_LLM=codex python scripts/real_run.py typhoon port_congestion   # 기본 연결. 추적 측정과 같은 조건이면 claude-code
 python eval/run_eval.py extraction out/real/typhoon/report.json --save out/eval/extraction_typhoon_new.json
 python eval/run_eval.py extraction out/real/port_congestion/report.json --save out/eval/extraction_port_congestion_new.json
 ```
 
 ```powershell
-$env:CLAUSETOWER_LLM = "claude-code"
+$env:CLAUSETOWER_LLM = "codex"
 python scripts/real_run.py typhoon port_congestion
 python eval/run_eval.py extraction out/real/typhoon/report.json --save out/eval/extraction_typhoon_new.json
 python eval/run_eval.py extraction out/real/port_congestion/report.json --save out/eval/extraction_port_congestion_new.json

@@ -10,7 +10,7 @@ const { chromium } = require('playwright'); const path = require('path'); const 
         citations: { rate: { clause: '제7조 제1항', quote: '지연된 매 1시간마다 해당 주문 상품가액의 0.08%를 배상한다' }, grace: { clause: '제7조 제2항', quote: '배송 시한 경과 후 3시간 이내의 지연은 배상 대상에서 제외한다' }, cap: { clause: '제7조 제3항', quote: '배상금 총액은 해당 주문 상품가액의 8%를 초과하지 아니한다' } } }, confidence: 0.9, ambiguities: [] });
   const fakeJudgment = (cid, user) => ({ customer_id: cid, has_clause: true, event_covered: user.includes('파업'), notice_ok: true, conditions_met: {}, applies: user.includes('파업'), reasoning: '가짜 응답: 파업은 면책 사유에 해당한다.', citation: { clause: '제12조', quote: '파업' } });
   // 로컬 도우미 흉내
-  await page.route('http://127.0.0.1:8787/**', async route => { const u = route.request().url(); if (u.endsWith('/health')) return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, mode: 'claude-code', model: 'claude-opus-5-5' }) });
+  await page.route('http://127.0.0.1:8787/**', async route => { const u = route.request().url(); if (u.endsWith('/health')) return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, mode: 'codex', model: 'codex 기본 모델' }) });
     const body = JSON.parse(route.request().postData()); const out = u.endsWith('/extract') ? fakeExtraction(body.customer_id) : fakeJudgment(body.customer_id, body.event.description + body.event.event_type);
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(out) }); });
   // 사내 OpenAI 호환 게이트웨이 흉내

@@ -163,13 +163,13 @@ https://namojo.github.io/clausetower/ 는 서버가 없는 정적 페이지다. 
 
 | 연결 방식 | 준비 | 흐름 |
 | --- | --- | --- |
+| 로컬 도우미(Codex CLI, 기본) | PC에서 `python -m clausetower serve --llm codex` | 브라우저 → 127.0.0.1:8787 → 기존 `llm.py`가 Codex CLI로 처리. 사내 LLM 중계도 같은 경로(`--llm openai`) |
 | Anthropic API 키 | 키를 입력 | 브라우저 → api.anthropic.com 직접 호출(tool use로 구조화 출력) |
-| 로컬 도우미(Claude 구독, Claude Code CLI) | PC에서 `python -m clausetower serve --llm claude-code` | 브라우저 → 127.0.0.1:8787 → 기존 `llm.py`가 CLI로 처리. 사내 LLM 중계도 같은 경로(`--llm openai`) |
 | 사내·호환 엔드포인트 | 기본 주소, 모델 이름, 토큰 입력 | 브라우저 → OpenAI 호환(`/chat/completions` + tools) 또는 Anthropic 호환(`/v1/messages`) 직접 호출. CORS가 막히면 도우미로 중계 |
 
 로컬 도우미는 기본으로 `127.0.0.1`에만 바인딩하고, 허용한 웹 출처(`https://namojo.github.io`, 포트와 무관한 `http://localhost`·`http://127.0.0.1`·`http://[::1]`)의 요청만 받는다. 출처는 `serve --allow-origin`(여러 번 가능)이나 `CLAUSETOWER_ALLOWED_ORIGINS`(쉼표 구분)로 더한다. 목록 밖 출처는 403, JSON이 아닌 POST는 415, 동시 요청 초과는 429로 거절한다. `--host`를 루프백 밖으로 두면 인증 없이 같은 네트워크에 LLM 연결이 열리므로 경고를 낸다. 실제 모델 호출이 실패해 자리표시자가 돌아오면 응답에 `fallback: true`가 붙고 웹은 그 결과를 쓰지 않는다. 설정과 문제 해결은 [설치·실행 가이드](docs/setup-guide.md)에 있다.
 
-로컬 도우미를 Claude 구독으로 띄우고 예시 계약서를 올린 실제 실행이다. 추출에 22초가 걸렸고 요율·유예·상한·면책 사유·통지 시한을 모두 맞게 읽었으며 인용은 원문과 일치했다.
+로컬 도우미를 Claude 구독(`claude-code` 모드, Codex 연결 도입 전)으로 띄우고 예시 계약서를 올린 실제 실행이다. 추출에 22초가 걸렸고 요율·유예·상한·면책 사유·통지 시한을 모두 맞게 읽었으며 인용은 원문과 일치했다.
 
 ![구독 경로 실제 실행](docs/screenshots/web/web_live_helper_real.png)
 
@@ -269,16 +269,17 @@ agent.py: 위를 묶어 Report(JSON) ─▶ dashboard.py(단일 HTML, 오프라�
 
 ### 5-5. LLM 연결 방식
 
-파이썬 파이프라인의 LLM 호출은 `llm.py` 한 곳을 지나며 모드는 네 가지다. 기본 `auto`는 API 키 → 사내 엔드포인트 설정 → Claude Code CLI → mock 순으로 고르고, `--llm`을 생략했는데 실제 LLM이 골라지면 비용 경고를 낸다. 호출은 스레드 풀로 병렬이고(기본 4, `CLAUSETOWER_CONCURRENCY`) 실패하면 정답지로 대체한 뒤 횟수를 보고서(`llm_fallbacks`)에 남긴다. 환경 변수 전체는 [설치·실행 가이드](docs/setup-guide.md)에 있다.
+파이썬 파이프라인의 LLM 호출은 `llm.py` 한 곳을 지나며 실제 모델 연결의 기본은 **Codex CLI**(`codex` 모드)다. 기본 `auto`는 Codex CLI → API 키 → 사내 엔드포인트 설정 → Claude Code CLI → mock 순으로 고르고, `--llm`을 생략했는데 실제 LLM이 골라지면 비용 경고를 낸다. 호출은 스레드 풀로 병렬이고(기본 4, `CLAUSETOWER_CONCURRENCY`) 실패하면 정답지로 대체한 뒤 횟수를 보고서(`llm_fallbacks`)에 남긴다. 환경 변수 전체는 [설치·실행 가이드](docs/setup-guide.md)에 있다.
 
 | 모드 | 무엇 | 언제 |
 | --- | --- | --- |
 | `mock` | 정답지를 그대로 사용, 네트워크 없음 | 테스트, 오프라인 데모 |
-| `claude-code` | Claude Code CLI를 서브프로세스로 호출 | API 키 없이 Claude 구독으로 |
+| `codex` | Codex CLI(`codex exec`)를 서브프로세스로 호출. 읽기 전용 샌드박스, 셸·앱·플러그인·웹 검색 끔, 빈 임시 폴더, 엄격 JSON 스키마(`--output-schema`)로 구조화 출력 | **기본 연결.** `codex` CLI 설치·로그인(`CLAUSETOWER_CODEX_MODEL`로 모델 지정) |
+| `claude-code` | Claude Code CLI를 서브프로세스로 호출 | 대안: Claude 구독으로 |
 | `anthropic` | Anthropic SDK | `ANTHROPIC_API_KEY`가 있을 때 |
 | `openai` | OpenAI 호환 chat/completions + 강제 tool call | 사내 LLM(`CLAUSETOWER_OPENAI_BASE_URL`, `CLAUSETOWER_OPENAI_API_KEY`, `CLAUSETOWER_MODEL`) |
 
-웹 데모의 세 연결 방식(API 키 직접, 로컬 도우미, 사내·호환 엔드포인트)은 3-8절에 있다. 로컬 도우미(`server.py`)는 `/extract`와 `/judge` 두 엔드포인트로 위 `llm.py`를 그대로 쓰며 계약 본문을 기록하지 않는다(로그에는 메서드와 경로만 남는다).
+웹 데모의 세 연결 방식(API 키 직접, 로컬 도우미, 사내·호환 엔드포인트)은 3-8절에 있다. 측정 PC에서 Codex CLI 0.154.0, `CLAUSETOWER_CODEX_MODEL=gpt-6-astra`로 판단 1회(17초)와 계약 C 추출 1회(28초)를 돌려 대체 없이 통과했고, C 추출은 요율·유예·상한·통지 시한이 정답지와 같았다(2026-11-02, 시나리오 전체 재측정은 아님). 로컬 도우미(`server.py`)는 `/extract`와 `/judge` 두 엔드포인트로 위 `llm.py`를 그대로 쓰며 계약 본문을 기록하지 않는다(로그에는 메서드와 경로만 남는다).
 
 ---
 
@@ -305,7 +306,7 @@ agent.py: 위를 묶어 Report(JSON) ─▶ dashboard.py(단일 HTML, 오프라�
 
 **다중 시드**(시드 30개로 화물 가액·노선·마감을 바꿔 반복, `eval/results/robustness.md`): 태풍 30/30 승, 절감 평균 69.1%(49.6~82.1). 항만 30/30, 58.7%(32.4~83.5). WMS 30/30, 62.4%(41.7~72.2).
 
-**실제 모델**(`claude-code`, claude-opus-5-5). 같은 계약서 8부와 시나리오 2종을 두 번 돌렸다. 2회차는 추출 프롬프트의 한 구절("지연 페널티 조건" → "지연 배상 조건")을 고친 뒤의 실행이다. 현재 보고서는 `eval/results/real/`, 1회차는 `eval/results/real_prev/`, 채점은 `eval/results/extraction_*.json`.
+**실제 모델**(`claude-code`, claude-opus-5-5. Codex 연결 도입 전 측정이며, Codex로는 시나리오 전체를 아직 다시 재지 않았다). 같은 계약서 8부와 시나리오 2종을 두 번 돌렸다. 2회차는 추출 프롬프트의 한 구절("지연 페널티 조건" → "지연 배상 조건")을 고친 뒤의 실행이다. 현재 보고서는 `eval/results/real/`, 1회차는 `eval/results/real_prev/`, 채점은 `eval/results/extraction_*.json`.
 
 | 항목 | 1회차 | 2회차(현재) |
 | --- | --- | --- |
@@ -345,13 +346,13 @@ python -m venv .venv && . .venv/bin/activate      # Windows PowerShell은 docs/s
 pip install -e ".[dev]"                           # 편집 설치 필수(계약서·시나리오·프롬프트가 저장소 루트에 있다)
 python -m clausetower demo --llm mock             # 3개 시나리오 실행 + out/demo/dashboard.html (네트워크 불필요)
 python -m clausetower run typhoon --llm mock      # 하나만
-python -m clausetower serve --llm claude-code     # 웹 데모용 로컬 도우미(Claude 구독). --llm openai 로 사내 LLM
+python -m clausetower serve --llm codex           # 웹 데모용 로컬 도우미(Codex CLI, 기본 연결). --llm openai 로 사내 LLM
 python scripts/build_site.py                      # 웹 데모를 site/에 조립
 ```
 
 **Windows·사내망.** PowerShell 명령, 사내 프록시에서 `NO_PROXY`에 `127.0.0.1,localhost` 추가, 콘솔 한글 출력용 `PYTHONUTF8=1`, Playwright 설치는 [설치·실행 가이드](docs/setup-guide.md)에 있다. 편집 설치가 아니면 `CLAUSETOWER_ROOT`에 저장소 경로를 지정해야 한다.
 
-실제 Claude로 돌리려면 `--llm claude-code`(구독), `--llm anthropic`(API 키), `--llm openai`(사내 LLM) 중 하나를 고른다(5-5절). 계약 추출은 시나리오 간에 공유되어 호출은 8 + 시나리오당 8회다.
+실제 모델로 돌리려면 `--llm codex`(Codex CLI, 기본 연결)를 쓴다. 대안으로 `--llm claude-code`(Claude 구독), `--llm anthropic`(API 키), `--llm openai`(사내 LLM)도 된다(5-5절). 계약 추출은 시나리오 간에 공유되어 호출은 8 + 시나리오당 8회다.
 
 **검증 절차(심사용).** 모든 숫자는 아래 명령으로 다시 나온다. 추적 중인 측정 파일(`eval/results/`)을 덮어쓰는 명령은 없다.
 
@@ -376,7 +377,7 @@ clausetower/
 ├── src/clausetower/
 │   ├── schemas.py     데이터 계약(PenaltyTerms, Judgment, Breakdown, Report …)
 │   ├── exposure.py    배상금 계산기. 결정적·순수. 유예→단위→요율/누진/정액→상한, 고객 합계 상한
-│   ├── llm.py         LLM 단일 출입구(mock | claude-code | anthropic | openai | auto), 구조화 출력, 병렬, 실패 시 대체·기록
+│   ├── llm.py         LLM 단일 출입구(codex | mock | claude-code | anthropic | openai | auto), 구조화 출력, 병렬, 실패 시 대체·기록
 │   ├── extract.py     계약 → PenaltyTerms(인용 포함), 사건 × 계약 → 불가항력 판단(조건 기계적 결합)
 │   ├── sim.py         배송 네트워크 시뮬레이터, 정책 5개, 우선순위 지역 탐색
 │   ├── agent.py       파이프라인과 '배상 노출 순위' 표, 재시뮬레이션

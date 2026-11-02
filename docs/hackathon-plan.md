@@ -179,7 +179,7 @@ python scripts/build_site.py && node scripts/verify_engine.js   # 36/36
 선택: 현재 프롬프트와 도구 차단 플래그로 실제 호출이 되는지 1회 확인한다. 과금되며, 2회차 로그 기준 태풍 시나리오 하나에 호출 16회, $1.78, 70초였다. 보고서의 `llm_fallbacks`가 0이어야 한다. 결과는 `out/` 아래에 쓰여 추적 파일을 바꾸지 않는다.
 
 ```bash
-python -m clausetower run typhoon --llm claude-code --no-search --out out/check
+python -m clausetower run typhoon --llm codex --no-search --out out/check
 ```
 
 ### 5-2. 코드 동결(2일 차 13:00)

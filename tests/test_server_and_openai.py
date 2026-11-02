@@ -193,8 +193,9 @@ def test_openai_compatible_mode(monkeypatch):
         monkeypatch.setenv("CLAUSETOWER_OPENAI_BASE_URL", f"http://127.0.0.1:{srv.server_address[1]}/v1")
         monkeypatch.setenv("CLAUSETOWER_OPENAI_API_KEY", "inhouse-token")
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.setattr("clausetower.llm.CODEX_BIN", "codex-not-installed-for-test")  # Codex CLI가 깔린 PC에서도 auto의 다음 순서를 시험한다
         llm = LLM("auto")
-        assert llm.mode == "openai", "BASE_URL이 있으면 auto는 openai를 고른다(키 없을 때)"
+        assert llm.mode == "openai", "Codex CLI가 없고 BASE_URL이 있으면 auto는 openai를 고른다(키 없을 때)"
         from clausetower.extract import extract_terms_from_text
         r = extract_terms_from_text(llm, "B", load_contract_text("B"))
         assert r.terms.basis == "per_hour" and r.confidence == 0.8 and llm.usage.calls == 1 and llm.usage.fallbacks == 0

@@ -123,12 +123,13 @@
 | 모드 | 무엇 | 설정 |
 | --- | --- | --- |
 | `mock` | 정답지 사용, 네트워크 없음 | – |
+| `codex` | Codex CLI(`codex exec`). **기본 연결** | `CLAUSETOWER_CODEX_BIN`, `CLAUSETOWER_CODEX_MODEL`, `CLAUSETOWER_CODEX_TIMEOUT` |
 | `claude-code` | Claude Code CLI(구독) | `CLAUSETOWER_CLAUDE_BIN`, `CLAUSETOWER_CLAUDE_TIMEOUT` |
 | `anthropic` | Anthropic SDK | `ANTHROPIC_API_KEY` |
 | `openai` | OpenAI 호환 chat/completions + 강제 tool call | `CLAUSETOWER_OPENAI_BASE_URL`, `CLAUSETOWER_OPENAI_API_KEY`, `CLAUSETOWER_MODEL` |
 
-- `auto`(기본)는 API 키 → 사내 엔드포인트 → claude CLI → mock 순으로 고른다. `--llm`을 생략했는데 실제 LLM이 골라지면 비용 경고를 낸다(`src/clausetower/cli.py`). 환경 변수 전체는 [설치·실행 가이드](setup-guide.md).
-- 실제 모델 측정은 claude-opus-5-5 한 모델이다(`eval/results/real/run.log`).
+- `auto`(기본)는 Codex CLI → API 키 → 사내 엔드포인트 → claude CLI → mock 순으로 고른다. `--llm`을 생략했는데 실제 LLM이 골라지면 비용 경고를 낸다(`src/clausetower/cli.py`). 환경 변수 전체는 [설치·실행 가이드](setup-guide.md).
+- 추적 중인 실제 모델 측정은 Codex 연결 도입 전 claude-opus-5-5 한 모델이다(`eval/results/real/run.log`). Codex로는 판단 1회·추출 1회만 확인했고 시나리오 전체는 다시 재지 않았다.
 
 **보여 줄 화면.** 웹 데모 "실제 케이스 분석"의 연결 방식 선택(`docs/screenshots/web/web_live_helper.png`).
 
@@ -280,6 +281,7 @@
 | 경로 | 본문이 가는 곳 | 보호 장치 |
 | --- | --- | --- |
 | `mock` | 없음(네트워크 없음) | – |
+| `codex` | Codex CLI → OpenAI | 읽기 전용 샌드박스, 셸·앱·플러그인·웹 검색 끔, 빈 임시 폴더, 세션 기록 안 남김(`src/clausetower/llm.py`의 `codex_command`) |
 | `claude-code` | Claude Code CLI → Anthropic | 내장 도구·사용자 MCP 끔, 임시 작업 폴더, 세션 저장 안 함(`src/clausetower/llm.py`의 `claude_command`) |
 | `anthropic` / `openai` | Anthropic API / 사내·호환 엔드포인트 | 경고 로그에 본문·모델 출력을 싣지 않음(오류 종류·필드 위치·길이만) |
 | 웹 직접 호출 | 브라우저 → 고른 엔드포인트 | 키·토큰은 기본 `sessionStorage`. "이 브라우저에 기억"을 켤 때만 `localStorage`(같은 출처 `namojo.github.io`의 다른 페이지와 공유). Anthropic 직접 호출은 `anthropic-dangerous-direct-browser-access` 헤더가 필요해 개인용 키를 권한다 |

@@ -95,7 +95,8 @@ def test_auto_mode_warns_before_real_llm_calls(monkeypatch, capsys):
 def test_cli_help_lists_every_llm_mode(capsys):
     with pytest.raises(SystemExit):
         main(["run", "--help"])
-    assert "openai" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "openai" in out and "codex" in out
 
 
 def test_eval_subcommand_works_outside_repo_root(tmp_path):

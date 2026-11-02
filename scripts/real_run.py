@@ -1,4 +1,4 @@
-"""실제 Claude(claude-code CLI 또는 SDK)로 시나리오를 돌려 out/real/<시나리오>/report.json에 저장한다.
+"""실제 모델(기본 Codex CLI. CLAUSETOWER_LLM으로 claude-code·anthropic·openai 선택 가능)로 시나리오를 돌려 out/real/<시나리오>/report.json에 저장한다.
 계약 추출은 한 번만 하고 시나리오 간에 공유한다. 사용: python scripts/real_run.py typhoon port_congestion"""
 import json
 import logging

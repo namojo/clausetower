@@ -1,5 +1,6 @@
 """로컬 도우미 서버. 웹 데모(GitHub Pages)가 이 PC의 LLM 연결로 계약을 읽게 해 준다.
 
+  python -m clausetower serve --port 8787 --llm codex           # Codex CLI(기본 연결)
   python -m clausetower serve --port 8787 --llm claude-code     # Claude 구독(CLI)
   CLAUSETOWER_OPENAI_BASE_URL=https://사내게이트웨이/v1 python -m clausetower serve --llm openai   # 사내 LLM
 
@@ -192,7 +193,7 @@ def serve(host: str = "127.0.0.1", port: int = 8787, llm: LLM | None = None, all
     if warn:
         print(warn, file=sys.stderr, flush=True)
     if llm.mode == "mock":
-        print("주의: mock 모드다. 실제 분석이 아니라 자리표시자 결과가 나온다. --llm claude-code 또는 환경변수를 확인하라.", flush=True)
+        print("주의: mock 모드다. 실제 분석이 아니라 자리표시자 결과가 나온다. --llm codex(Codex CLI 설치·로그인 필요) 또는 환경변수를 확인하라.", flush=True)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

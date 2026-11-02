@@ -27,7 +27,7 @@ def _print_summary(r: Report) -> None:
               f"({x.blocked_by or f'배상 노출액 {x.marginal_krw:,}원'})")
 
 
-LLM_HELP = "mock | claude-code | anthropic | openai | auto (생략하면 CLAUSETOWER_LLM, 그것도 없으면 auto: API 키 → 사내 엔드포인트 → claude CLI → mock)"
+LLM_HELP = "codex | mock | claude-code | anthropic | openai | auto (생략하면 CLAUSETOWER_LLM, 그것도 없으면 auto: Codex CLI → API 키 → 사내 엔드포인트 → claude CLI → mock)"
 
 
 def _make_llm(requested: str | None) -> LLM:

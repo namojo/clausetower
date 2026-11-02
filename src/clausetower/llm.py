@@ -1,8 +1,9 @@
 """LLM 호출의 단일 출입구.
 
-모드(CLAUSETOWER_LLM): claude-code(CLI, 구독) | anthropic(SDK, ANTHROPIC_BASE_URL로 사내 호환 게이트웨이 가능) |
+모드(CLAUSETOWER_LLM): codex(Codex CLI `codex exec`, 기본 연결) | claude-code(CLI, 구독) |
+anthropic(SDK, ANTHROPIC_BASE_URL로 사내 호환 게이트웨이 가능) |
 openai(OpenAI 호환 chat/completions + tools, 사내 LLM용: CLAUSETOWER_OPENAI_BASE_URL, CLAUSETOWER_OPENAI_API_KEY) | mock(결정적) |
-auto(API 키 → 사내 엔드포인트(CLAUSETOWER_OPENAI_BASE_URL) → claude CLI → mock).
+auto(Codex CLI → API 키 → 사내 엔드포인트(CLAUSETOWER_OPENAI_BASE_URL) → claude CLI → mock).
 구조화 출력은 pydantic 스키마로 검증한다. 실패하면 1회 재시도하고, 그래도 안 되면 mock 함수로 대체하고 로그에 남긴다.
 경고 로그에는 모델 출력·계약 본문을 싣지 않는다(오류 종류·필드 위치·길이·종료 코드만). 원문 일부는 DEBUG 수준에서만 남긴다.
 """
@@ -30,6 +31,11 @@ DEFAULT_MODEL = os.environ.get("CLAUSETOWER_MODEL", "claude-opus-5-5")
 CLAUDE_BIN = os.environ.get("CLAUSETOWER_CLAUDE_BIN", "claude")
 CLAUDE_TIMEOUT = int(os.environ.get("CLAUSETOWER_CLAUDE_TIMEOUT", "600"))
 CLAUDE_DISALLOWED_TOOLS = "Bash,Read,Edit,Write,MultiEdit,Glob,Grep,WebSearch,WebFetch,Agent,Task,NotebookEdit,TodoWrite,Skill"
+CODEX_BIN = os.environ.get("CLAUSETOWER_CODEX_BIN", "codex")
+CODEX_TIMEOUT = int(os.environ.get("CLAUSETOWER_CODEX_TIMEOUT", "600"))
+# 비워 두면 ~/.codex/config.toml의 model을 쓴다. 그 모델을 계정이 지원하지 않으면 여기에 지정한다.
+CODEX_MODEL = os.environ.get("CLAUSETOWER_CODEX_MODEL", "")
+CODEX_DEFAULT_LABEL = "codex 기본 모델"
 
 
 def _err_summary(e: BaseException) -> str:
@@ -46,6 +52,8 @@ def resolve_mode(mode: str | None) -> str:
     m = (mode or os.environ.get("CLAUSETOWER_LLM") or "auto").lower()
     if m != "auto":
         return m
+    if shutil.which(CODEX_BIN):
+        return "codex"
     if os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"):
         return "anthropic"
     if os.environ.get("CLAUSETOWER_OPENAI_BASE_URL"):
@@ -69,6 +77,116 @@ def claude_command(model: str, system: str, schema: type[BaseModel]) -> list[str
             "--no-session-persistence", "--tools", "", "--strict-mcp-config", "--disallowedTools", CLAUDE_DISALLOWED_TOOLS]
 
 
+def _resolve(node: dict, defs: dict) -> dict:
+    while isinstance(node, dict) and "$ref" in node:
+        node = defs[node["$ref"].split("/")[-1]]
+    return node
+
+
+def _nullable(node: dict, defs: dict) -> bool:
+    node = _resolve(node, defs)
+    if node.get("type") == "null":
+        return True
+    return any(_nullable(x, defs) for x in node.get("anyOf", []))
+
+
+def _strict_node(node: dict, defs: dict) -> dict:
+    """pydantic JSON 스키마 한 노드를 OpenAI 엄격 구조화 출력 규칙에 맞게 바꾼다.
+    객체는 모든 속성을 required로, additionalProperties는 false로 둔다. 키가 정해지지 않은 사전은 [{key, value}] 배열로 바꾼다."""
+    if "$ref" in node:
+        return {"$ref": node["$ref"]}
+    out: dict = {}
+    if node.get("description"):
+        out["description"] = node["description"]
+    if "anyOf" in node:
+        out["anyOf"] = [_strict_node(x, defs) for x in node["anyOf"]]
+        return out
+    t = node.get("type")
+    if t == "object":
+        props = node.get("properties")
+        if props is not None:
+            req = set(node.get("required", []))
+            sp = {}
+            for k, v in props.items():
+                s = _strict_node(v, defs)
+                if k not in req and not _nullable(v, defs):
+                    s = {"anyOf": [s, {"type": "null"}]}  # 선택 필드: null이면 되돌릴 때 키를 빼서 pydantic 기본값을 쓴다
+                sp[k] = s
+            out.update({"type": "object", "properties": sp, "required": list(sp), "additionalProperties": False})
+            return out
+        ap = node.get("additionalProperties")
+        if isinstance(ap, dict):
+            out.update({"type": "array", "items": {"type": "object", "properties": {"key": {"type": "string"}, "value": _strict_node(ap, defs)},
+                                                   "required": ["key", "value"], "additionalProperties": False}})
+            out["description"] = (out.get("description", "") + " (키-값 쌍의 배열로 적는다)").strip()
+            return out
+        out.update({"type": "object", "properties": {}, "required": [], "additionalProperties": False})
+        return out
+    if t == "array":
+        out.update({"type": "array", "items": _strict_node(node.get("items", {}), defs)})
+        return out
+    for k in ("type", "enum", "const"):
+        if k in node:
+            out[k] = node[k]
+    return out
+
+
+def codex_schema(schema: type[BaseModel]) -> dict:
+    """Codex `--output-schema`용 엄격 스키마. Codex는 OpenAI 엄격 모드로 보내므로 pydantic 스키마를 그대로 쓰면 400이 난다."""
+    src = schema.model_json_schema()
+    defs = src.get("$defs", {})
+    out = _strict_node({k: v for k, v in src.items() if k != "$defs"}, defs)
+    if defs:
+        out["$defs"] = {name: _strict_node(d, defs) for name, d in defs.items()}
+    return out
+
+
+def _restore(data, node: dict, defs: dict):
+    """codex_schema로 받은 출력을 원래 pydantic 스키마 모양으로 되돌린다([{key, value}] → 사전, 비선택 필드의 null 제거)."""
+    node = _resolve(node, defs)
+    if data is None:
+        return None
+    if "anyOf" in node:
+        branches = [b for b in node["anyOf"] if _resolve(b, defs).get("type") != "null"]
+        return _restore(data, branches[0], defs) if branches else data
+    t = node.get("type")
+    if t == "object":
+        props = node.get("properties")
+        if props is not None and isinstance(data, dict):
+            out = {}
+            for k, v in data.items():
+                sub = props.get(k)
+                if sub is None:
+                    continue
+                if v is None and not _nullable(sub, defs):
+                    continue
+                out[k] = _restore(v, sub, defs)
+            return out
+        ap = node.get("additionalProperties")
+        if isinstance(ap, dict) and isinstance(data, list):
+            return {str(e.get("key")): _restore(e.get("value"), ap, defs) for e in data if isinstance(e, dict)}
+        return data
+    if t == "array" and isinstance(data, list):
+        return [_restore(x, node.get("items", {}), defs) for x in data]
+    return data
+
+
+def codex_command(model: str, schema_path: str, out_path: str) -> list[str]:
+    """codex exec 호출 인자. 읽기 전용 샌드박스, 셸·앱·플러그인·웹 검색 끔, 세션 기록 안 남김.
+    작업 폴더는 빈 임시 폴더라 계약서 본문에 심은 지시가 저장소 파일을 읽을 여지가 없다. 프롬프트는 표준 입력으로 보낸다."""
+    cmd = [shutil.which(CODEX_BIN) or CODEX_BIN, "exec", "--skip-git-repo-check", "--ephemeral", "--sandbox", "read-only", "--color", "never",
+           "--disable", "shell_tool", "--disable", "apps", "--disable", "plugins", "-c", 'web_search="disabled"',
+           "--output-schema", schema_path, "-o", out_path, "--json"]
+    if model and model != CODEX_DEFAULT_LABEL:
+        cmd += ["-m", model]
+    return cmd + ["-"]
+
+
+def codex_prompt(system: str, user: str) -> str:
+    """codex exec에는 시스템 프롬프트 인자가 없어 지침과 입력을 한 프롬프트로 묶는다."""
+    return f"{system.strip()}\n\n아래 입력을 처리해 지정된 JSON 스키마로만 답하라. 파일을 읽거나 명령을 실행하지 마라.\n\n{user}"
+
+
 @dataclass
 class Usage:
     calls: int = 0
@@ -87,6 +205,14 @@ class LLM:
         self.usage = Usage()
         self._client = None
         self.concurrency = 1 if self.mode == "mock" else int(os.environ.get("CLAUSETOWER_CONCURRENCY", "4"))
+        if self.mode == "codex":
+            if not shutil.which(CODEX_BIN):
+                log.warning("codex CLI를 찾지 못해 mock으로 전환한다.")
+                self.mode = "mock"
+            elif CODEX_MODEL:
+                self.model = CODEX_MODEL
+            elif model.startswith("claude"):
+                self.model = CODEX_DEFAULT_LABEL
         if self.mode == "claude-code" and not shutil.which(CLAUDE_BIN):
             log.warning("claude CLI를 찾지 못해 mock으로 전환한다.")
             self.mode = "mock"
@@ -103,6 +229,8 @@ class LLM:
               max_tokens: int = 8000) -> T:
         if self.mode == "mock":
             return mock_fn()
+        if self.mode == "codex":
+            return self._parse_codex(stage=stage, system=system, user=user, schema=schema, mock_fn=mock_fn)
         if self.mode == "claude-code":
             return self._parse_claude_code(stage=stage, system=system, user=user, schema=schema, mock_fn=mock_fn)
         if self.mode == "openai":
@@ -175,6 +303,59 @@ class LLM:
                 log.warning("[%s] claude-code 응답 처리 실패(시도 %d): %s", stage, attempt + 1, _err_summary(e))
         self.usage.fallbacks += 1
         log.error("[%s] claude-code 실패, mock으로 대체한다: %s", stage, _err_summary(last) if last else "?")
+        return mock_fn()
+
+    def _parse_codex(self, *, stage, system, user, schema, mock_fn):
+        prompt = codex_prompt(system, user)
+        src = schema.model_json_schema()
+        defs = src.get("$defs", {})
+        last: Exception | None = None
+        for attempt in range(2):
+            t0 = time.time()
+            try:
+                with tempfile.TemporaryDirectory() as cwd:
+                    schema_path = os.path.join(cwd, "schema.json")
+                    out_path = os.path.join(cwd, "last.json")
+                    with open(schema_path, "w", encoding="utf-8") as f:
+                        json.dump(codex_schema(schema), f, ensure_ascii=False)
+                    # Codex CLI는 UTF-8로 읽고 쓴다. 한국어 Windows 로캘(cp949)에 맡기지 않는다.
+                    proc = subprocess.run(codex_command(self.model, schema_path, out_path), input=prompt, capture_output=True, text=True,
+                                          encoding="utf-8", errors="replace", timeout=CODEX_TIMEOUT, cwd=cwd)
+                    inp = out = 0
+                    err_msg = None
+                    for line in (proc.stdout or "").splitlines():
+                        try:
+                            ev = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        if ev.get("type") == "turn.completed":
+                            u = ev.get("usage") or {}
+                            inp += int(u.get("input_tokens", 0) or 0)
+                            out += int(u.get("output_tokens", 0) or 0)
+                        elif ev.get("type") in ("turn.failed", "error"):
+                            err_msg = str((ev.get("error") or {}).get("message") or ev.get("message") or "")
+                    final = open(out_path, encoding="utf-8").read() if os.path.exists(out_path) else ""
+                self._count(stage, time.time() - t0, inp, out)
+                if proc.returncode != 0 or not final.strip():
+                    log.debug("[%s] codex 오류: %s / stderr: %s", stage, (err_msg or "")[:500], (proc.stderr or "").strip()[:500])
+                    code = ""
+                    if err_msg:
+                        try:
+                            code = (json.loads(err_msg).get("error") or {}).get("code") or ""
+                        except (json.JSONDecodeError, AttributeError):
+                            code = ""
+                    raise RuntimeError(f"codex 종료 코드 {proc.returncode}{' (' + code + ')' if code else ''}, 최종 응답 {len(final)}자")
+                payload = _restore(json.loads(final), src, defs)
+                return schema.model_validate(payload)
+            except subprocess.TimeoutExpired as e:
+                last = e
+                log.warning("[%s] codex 시간 초과(시도 %d)", stage, attempt + 1)
+            except (ValidationError, ValueError, RuntimeError, TypeError, AttributeError, KeyError, OSError) as e:
+                # 어떤 응답 처리 실패도 밖으로 내보내지 않고 정답지(또는 자리표시자) 대체로 떨어지게 한다
+                last = e
+                log.warning("[%s] codex 응답 처리 실패(시도 %d): %s", stage, attempt + 1, _err_summary(e))
+        self.usage.fallbacks += 1
+        log.error("[%s] codex 실패, mock으로 대체한다: %s", stage, _err_summary(last) if last else "?")
         return mock_fn()
 
     def _parse_openai(self, *, stage, system, user, schema, mock_fn, max_tokens):

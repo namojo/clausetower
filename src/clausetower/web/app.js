@@ -129,7 +129,7 @@
 // 계약서 전문을 데이터 경계로 감싼다(파이썬 extract.contract_block과 같은 형식). 프롬프트는 이 안의 지시를 따르지 않는다.
 function contractBlock(text) { return `--- 계약서 전문 ---\n<contract>\n${text}\n</contract>`; }
 
-// ---------------- 실제 케이스 분석(AI). 연결 방식 셋: API 키 직접 / 로컬 도우미(구독·사내 중계) / 사내·호환 엔드포인트 ----------------
+// ---------------- 실제 케이스 분석(AI). 연결 방식 셋: 로컬 도우미(Codex CLI·사내 중계, 기본) / API 키 직접 / 사내·호환 엔드포인트 ----------------
 (function () {
   const D = window.CT_DATA; const $ = s => document.querySelector(s);
   // 키·토큰은 기본으로 이 탭(sessionStorage)에만 둔다. "기억"을 켰을 때만 localStorage에 남긴다.
@@ -141,11 +141,11 @@ function contractBlock(text) { return `--- 계약서 전문 ---\n<contract>\n${t
     set: (k, v) => { (SECRET.has(k) ? [sessionStorage, localStorage] : [localStorage]).forEach(a => a.removeItem(P + k)); if (v) (SECRET.has(k) && !remember() ? sessionStorage : localStorage).setItem(P + k, v); } };
   const rem = $('#k-remember'); if (rem) { rem.checked = remember(); rem.addEventListener('change', e => { if (e.target.checked) localStorage.setItem(P + 'remember_keys', '1'); else localStorage.removeItem(P + 'remember_keys'); for (const k of SECRET) store.set(k, store.get(k)); }); }
   const HELP = { api: '본인의 Anthropic API 키로 이 브라우저가 api.anthropic.com을 직접 호출한다. 서버를 거치지 않는다.',
-    helper: '브라우저는 Claude 구독(CLI)을 직접 못 쓴다. PC에서 도우미를 띄우면 도우미가 기존 파이프라인(llm.py)으로 처리한다. 사내 LLM도 도우미가 중계할 수 있다.',
+    helper: '기본 연결. 브라우저는 Codex CLI를 직접 못 쓴다. PC에서 도우미(python -m clausetower serve --llm codex)를 띄우면 도우미가 기존 파이프라인(llm.py)으로 Codex CLI를 부른다. 사내 LLM도 도우미가 중계할 수 있다.',
     custom: 'OpenAI 호환 또는 Anthropic 호환 사내 게이트웨이를 브라우저에서 직접 호출한다. 도구 호출(tool use)로 구조화 출력을 받는다.' };
   function backend() { return $('#k-backend').value; }
   function showBackend() { const b = backend(); document.querySelectorAll('[data-for]').forEach(el => el.style.display = el.dataset.for === b ? '' : 'none'); $('#k-help').textContent = HELP[b]; store.set('backend', b); }
-  $('#k-backend').value = store.get('backend') || 'api'; $('#k-backend').addEventListener('change', showBackend); showBackend();
+  $('#k-backend').value = store.get('backend') || 'helper'; $('#k-backend').addEventListener('change', showBackend); showBackend();
   const masked = v => v ? '••••••••' + v.slice(-4) : '';
   $('#k-key').value = masked(store.get('anthropic_key'));
   $('#k-save').onclick = () => { const v = $('#k-key').value.trim(); if (v && !v.startsWith('•')) { store.set('anthropic_key', v); $('#k-key').value = masked(v); status(remember() ? 'API 키 저장됨(이 브라우저에 기억)' : 'API 키 저장됨(이 탭에만, 닫으면 지워짐)', true); } };
@@ -187,7 +187,7 @@ function contractBlock(text) { return `--- 계약서 전문 ---\n<contract>\n${t
     if ($('#c-proto').value === 'anthropic') return callAnthropicLike(url.replace(/\/$/, '') + '/v1/messages', key ? { 'x-api-key': key, authorization: 'Bearer ' + key } : {}, model, { system, user, schema, toolName, maxTokens });
     return callOpenAILike(url, key, model, { system, user, schema, toolName, maxTokens });
   }
-  const backendLabel = () => ({ api: 'Anthropic API(' + $('#k-model').value + ')', helper: '로컬 도우미', custom: '사내 엔드포인트(' + (store.get('custom_model') || '?') + ')' })[backend()];
+  const backendLabel = () => ({ api: 'Anthropic API(' + $('#k-model').value + ')', helper: '로컬 도우미(Codex CLI)', custom: '사내 엔드포인트(' + (store.get('custom_model') || '?') + ')' })[backend()];
 
   // 인용 검사: '…'(생략)·' / '(이어 붙임)로 나뉜 조각 하나하나가 통째로 원문에 있어야 한다. 줄바꿈·연속 공백 차이만 무시한다(eval/run_eval.py quote_is_verbatim과 같은 규칙).
   const normWs = s => String(s || '').replace(/\s+/g, ' ').trim();

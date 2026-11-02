@@ -24,7 +24,7 @@
 | Python 패키지 | 필수 | `pydantic>=2.6`, `pyyaml>=6.0`, `anthropic>=1.0`, 시험용 `pytest>=8.0`. 사내망이면 PyPI 미러나 프록시 설정이 있어야 설치된다 | `pyproject.toml` |
 | Node.js | 엔진 대조·스모크용 | CI는 22, 측정 PC는 v24.18.0. 없으면 JS 대조 시험은 건너뛴다(skipped) | `pages.yml`, `tests/test_web.py` |
 | Playwright + Chromium | 선택(브라우저 스모크) | `package.json`이 없어 따로 설치한다(2절 끝) | `scripts/smoke_web.js` |
-| Claude Code CLI 또는 API 키 | 선택(실제 모드) | Claude 구독이면 `claude` CLI(측정 PC 2.1.316), API면 `ANTHROPIC_API_KEY`, 사내 LLM이면 OpenAI 호환 주소 | `src/clausetower/llm.py` |
+| Codex CLI | 실제 모드(기본 연결) | `codex` CLI 설치·로그인(측정 PC 0.154.0). 대안: `claude` CLI, `ANTHROPIC_API_KEY`, 사내 OpenAI 호환 주소 | `src/clausetower/llm.py` |
 
 mock 모드(정답지 사용)만 쓰면 네트워크도 API 키도 필요 없다. 심사용 숫자는 모두 mock 모드와 저장된 실제 모델 보고서로 다시 나온다.
 
@@ -52,7 +52,7 @@ python -m pip install -e ".[dev]"
 ```
 
 - `$env:` 설정은 그 PowerShell 창에서만 유지된다. 새 창을 열면 다시 넣는다.
-- `PYTHONUTF8=1`은 콘솔 출력용이다. `claude-code` 모드가 CLI와 주고받는 한글은 이 설정 없이도 UTF-8로 처리된다(`llm.py`의 `encoding="utf-8"`).
+- `PYTHONUTF8=1`은 콘솔 출력용이다. `codex`·`claude-code` 모드가 CLI와 주고받는 한글은 이 설정 없이도 UTF-8로 처리된다(`llm.py`의 `encoding="utf-8"`).
 - `NO_PROXY`는 `pytest`에는 더 이상 필요 없다. 시험 프로세스가 스스로 `127.0.0.1,localhost`를 더한다(`tests/conftest.py`). 손으로 `curl`이나 파이썬 클라이언트로 로컬 도우미를 부를 때, 사내 LLM 주소가 프록시를 거치면 안 될 때 필요하다.
 - bash에서 사내 프록시를 쓰면 같은 설정을 `export NO_PROXY="$NO_PROXY,127.0.0.1,localhost"`로 넣는다.
 
@@ -114,10 +114,11 @@ PowerShell에서도 명령은 같다.
 | 모드 | 무엇 | 준비 |
 | --- | --- | --- |
 | `mock` | 정답지를 그대로 사용. 네트워크 없음 | 없음 |
+| `codex` | Codex CLI(`codex exec`)를 하위 프로세스로 호출. **기본 연결** | `codex` CLI 설치·로그인. 계정이 config.toml의 기본 모델을 지원하지 않으면 `CLAUSETOWER_CODEX_MODEL` 지정 |
 | `claude-code` | Claude Code CLI를 하위 프로세스로 호출(Claude 구독) | `claude` CLI 설치·로그인. 못 찾으면 경고 후 mock으로 전환 |
 | `anthropic` | Anthropic SDK | `ANTHROPIC_API_KEY`(사내 호환 게이트웨이면 `ANTHROPIC_BASE_URL`도) |
 | `openai` | OpenAI 호환 `/chat/completions` + 강제 tool call(사내 LLM) | `CLAUSETOWER_OPENAI_BASE_URL`, 필요하면 `CLAUSETOWER_OPENAI_API_KEY`, `CLAUSETOWER_MODEL` |
-| `auto` | API 키 → 사내 엔드포인트 → `claude` CLI → mock 순으로 고른다 | – |
+| `auto` | Codex CLI → API 키 → 사내 엔드포인트 → `claude` CLI → mock 순으로 고른다 | – |
 
 **환경 변수**
 
@@ -126,6 +127,9 @@ PowerShell에서도 명령은 같다.
 | `CLAUSETOWER_LLM` | 없음(`auto`) | 위 모드 이름. `--llm`이 있으면 무시된다 |
 | `CLAUSETOWER_MODEL` | `claude-opus-5-5` | 모델 이름. `openai` 모드에서는 사내 모델 이름을 넣는다 |
 | `CLAUSETOWER_CONCURRENCY` | `4`(mock은 1) | 동시 호출 수 |
+| `CLAUSETOWER_CODEX_BIN` | `codex` | Codex CLI 실행 파일 경로. PATH에 없을 때 |
+| `CLAUSETOWER_CODEX_MODEL` | 없음(config.toml의 `model`) | Codex 모델. 계정이 기본 모델을 지원하지 않으면(`model_not_found`) 지정한다. 측정 PC는 `gpt-6-astra` |
+| `CLAUSETOWER_CODEX_TIMEOUT` | `600` | Codex 호출 하나의 제한 시간(초) |
 | `CLAUSETOWER_CLAUDE_BIN` | `claude` | CLI 실행 파일 경로. PATH에 없을 때 |
 | `CLAUSETOWER_CLAUDE_TIMEOUT` | `600` | 호출 하나의 제한 시간(초). `openai` 모드에도 쓰인다 |
 | `CLAUSETOWER_OPENAI_BASE_URL` | 없음 | 예: `https://llm.company.local/v1`. 값이 있으면 `auto`가 `openai`를 고른다 |
@@ -138,13 +142,13 @@ PowerShell에서도 명령은 같다.
 **실행 예**
 
 ```bash
-python -m clausetower run typhoon --llm claude-code --no-search   # 시나리오 하나, 탐색 근사 최적 생략
-CLAUSETOWER_LLM=claude-code python scripts/real_run.py typhoon port_congestion   # 추적 보고서와 같은 구성, out/real/에 저장
+python -m clausetower run typhoon --llm codex --no-search   # 시나리오 하나, 탐색 근사 최적 생략
+CLAUSETOWER_LLM=codex python scripts/real_run.py typhoon port_congestion   # 추적 보고서와 같은 구성, out/real/에 저장
 ```
 
 ```powershell
-python -m clausetower run typhoon --llm claude-code --no-search
-$env:CLAUSETOWER_LLM = "claude-code"; python scripts/real_run.py typhoon port_congestion
+python -m clausetower run typhoon --llm codex --no-search
+$env:CLAUSETOWER_LLM = "codex"; python scripts/real_run.py typhoon port_congestion
 Remove-Item Env:CLAUSETOWER_LLM      # 남겨 두면 이 창의 다음 명령이 --llm 없이도 실제 호출을 한다
 ```
 
@@ -163,18 +167,18 @@ Remove-Item Env:CLAUSETOWER_LLM      # 남겨 두면 이 창의 다음 명령이
 
 ## 6. 로컬 도우미
 
-웹 데모(정적 페이지)가 이 PC의 LLM 연결(Claude 구독, 사내 LLM)로 계약을 읽게 하는 작은 서버다(`src/clausetower/server.py`).
+웹 데모(정적 페이지)가 이 PC의 LLM 연결(기본 Codex CLI, 사내 LLM)로 계약을 읽게 하는 작은 서버다(`src/clausetower/server.py`).
 
 **실행**
 
 ```bash
-python -m clausetower serve --llm claude-code          # Claude 구독
+python -m clausetower serve --llm codex                # Codex CLI(기본 연결)
 CLAUSETOWER_OPENAI_BASE_URL=https://llm.company.local/v1 python -m clausetower serve --llm openai   # 사내 LLM
 curl http://127.0.0.1:8787/health                      # {"ok": true, "mode": ..., "model": ..., "calls": ..., "fallbacks": ...}
 ```
 
 ```powershell
-python -m clausetower serve --llm claude-code
+python -m clausetower serve --llm codex
 $env:CLAUSETOWER_OPENAI_BASE_URL = "https://llm.company.local/v1"; python -m clausetower serve --llm openai
 curl.exe http://127.0.0.1:8787/health
 ```
@@ -239,6 +243,8 @@ node scripts/smoke_web.js site/index.html out/smoke                             
 | Playwright가 브라우저 실행 파일이 없다고 함 | Chromium 미설치 | 설치 폴더에서 `npx playwright install chromium` |
 | `verify_engine.js`가 `MISSING out/demo/report_*.json` 또는 `llm_mode=… not mock` | mock 데모를 안 돌렸거나 실제 모드로 덮어씀 | `python -m clausetower demo --llm mock` 뒤 다시 |
 | `verify_engine.js`가 `MISSING site/data.js` | 사이트 미조립 | `python scripts/build_site.py` |
+| 로그에 `codex CLI를 찾지 못해 mock으로 전환한다.` | `codex` CLI 미설치 또는 PATH 밖 | Codex CLI 설치·로그인, 또는 `CLAUSETOWER_CODEX_BIN`에 경로 지정 |
+| 로그에 `codex 종료 코드 1 (model_not_found)` | config.toml의 기본 모델을 이 계정(ChatGPT 로그인)이 지원하지 않음 | `CLAUSETOWER_CODEX_MODEL`에 지원 모델 지정(예: `gpt-6-astra`). `codex exec -m <모델> "hi"`로 먼저 확인 |
 | 로그에 `claude CLI를 찾지 못해 mock으로 전환한다.` | `claude` CLI 미설치 또는 PATH 밖 | CLI 설치·로그인, 또는 `CLAUSETOWER_CLAUDE_BIN`에 경로 지정. 전환된 실행의 숫자는 정답지 값이다 |
 | `주의: --llm을 지정하지 않아 auto가 실제 LLM(…)을 골랐다` | `--llm` 생략, PC에 키나 CLI가 있음 | 비용 없이 보려면 `--llm mock` 또는 `CLAUSETOWER_LLM=mock` |
 | `run.log`의 `fallbacks`나 보고서 `llm_fallbacks`가 0보다 큼 | 실제 모델 호출 실패(시간 초과, 인증, 출력 형식) | 도우미·CLI 로그(stderr)를 확인. 시간 초과면 `CLAUSETOWER_CLAUDE_TIMEOUT`을 늘린다 |

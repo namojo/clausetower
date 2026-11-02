@@ -81,5 +81,5 @@ python .claude/skills/ct-quality-gates/scripts/run_gates.py --only pytest verify
 ## 지키는 것
 
 - 게이트를 통과시키려고 시험이나 `eval/results/`를 고치지 않는다. 측정 기록을 고치면 재현성 주장이 무너진다.
-- 실제 LLM 재측정(`scripts/real_run.py`, `--llm claude-code|anthropic|openai`)은 1회 약 $2와 5분이 들므로 사용자가 요청할 때만 실행한다.
+- 실제 LLM 재측정(`scripts/real_run.py`, `--llm codex|claude-code|anthropic|openai`)은 1회 약 $2와 5분이 들므로 사용자가 요청할 때만 실행한다.
 - 결과 JSON은 `_workspace/` 아래에 둔다. 저장소 첫 화면에 남기지 않는다.

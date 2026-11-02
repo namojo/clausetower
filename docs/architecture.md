@@ -20,13 +20,13 @@ flowchart LR
     P["prompts/<br/>extract.md · judge.md"]
   end
   subgraph PY["파이썬 파이프라인 (agent.run)"]
-    L["llm.py<br/>mock · claude-code · anthropic · openai"]
+    L["llm.py<br/>codex(기본) · mock · claude-code · anthropic · openai"]
     X["extract.py<br/>추출 · 면책 판단 · 조건 결합"]
     E["exposure.py<br/>배상금 계산기"]
     M["sim.py<br/>시뮬레이터 · 정책 5개 · 탐색"]
     A["agent.py<br/>배상 노출 순위 · Report"]
   end
-  EXT["외부 LLM<br/>Anthropic API · claude CLI · 사내 게이트웨이"]
+  EXT["외부 LLM<br/>Codex CLI(기본) · Anthropic API · claude CLI · 사내 게이트웨이"]
   R["Report JSON<br/>out/demo/report_*.json<br/>eval/results/real/report_*.json"]
   D["dashboard.py<br/>단일 HTML(오프라인)"]
   B["scripts/build_site.py<br/>site/ 조립(data.js)"]
@@ -63,7 +63,7 @@ flowchart LR
 | 경로 | 명령·주소 | LLM 호출 | 산출물 |
 | --- | --- | --- | --- |
 | 오프라인 데모(mock) | `python -m clausetower demo --llm mock` | 없음(정답지) | `out/demo/report_*.json`, `out/demo/dashboard.html` |
-| 실제 모드 | `python -m clausetower run typhoon --llm claude-code` 등 | 추출 8회 + 시나리오당 판단 8회 | `out/<시나리오>/report.json` |
+| 실제 모드 | `python -m clausetower run typhoon --llm codex` 등 | 추출 8회 + 시나리오당 판단 8회 | `out/<시나리오>/report.json` |
 | 웹 데모 | https://namojo.github.io/clausetower/ (조립은 `python scripts/build_site.py`) | 계약서를 올리거나 사건을 다시 판단할 때만 | 브라우저 화면 |
 
 명령의 설치·환경 변수는 [설치·실행 가이드](setup-guide.md)에 있다.
@@ -300,10 +300,11 @@ P(s, 도착) = compute_penalty(지연 = 도착 − 마감)의 건별 금액
 
 `--llm` 인자 → `CLAUSETOWER_LLM` → `auto` 순으로 정한다. `auto`는 다음 순서로 고른다.
 
-1. `ANTHROPIC_API_KEY` 또는 `ANTHROPIC_AUTH_TOKEN`이 있으면 `anthropic`
-2. `CLAUSETOWER_OPENAI_BASE_URL`이 있으면 `openai`
-3. `claude` 실행 파일(`CLAUSETOWER_CLAUDE_BIN`)이 PATH에 있으면 `claude-code`
-4. 아니면 `mock`
+1. `codex` 실행 파일(`CLAUSETOWER_CODEX_BIN`)이 PATH에 있으면 `codex`(기본 연결)
+2. `ANTHROPIC_API_KEY` 또는 `ANTHROPIC_AUTH_TOKEN`이 있으면 `anthropic`
+3. `CLAUSETOWER_OPENAI_BASE_URL`이 있으면 `openai`
+4. `claude` 실행 파일(`CLAUSETOWER_CLAUDE_BIN`)이 PATH에 있으면 `claude-code`
+5. 아니면 `mock`
 
 `--llm`을 생략했는데 `auto`가 실제 LLM을 고르면 `cli.py`가 "비용 없이 보려면 --llm mock" 경고를 stderr에 낸다. `claude-code`인데 CLI가 없거나 `anthropic` 클라이언트 생성이 실패하면 시작할 때 `mock`으로 바꾼다. 모델은 `CLAUSETOWER_MODEL`(기본 `claude-opus-5-5`). 환경 변수 전체는 [설치·실행 가이드](setup-guide.md) 5절에 있다.
 
@@ -313,6 +314,7 @@ P(s, 도착) = compute_penalty(지연 = 도착 − 마감)의 건별 금액
 | --- | --- | --- | --- |
 | `mock` | 없음 | 정답지(`contracts/golden/`)를 그대로 반환 | – |
 | `anthropic` | Anthropic SDK `messages.parse` | `output_format=스키마` | SDK의 `parsed_output` |
+| `codex` | `codex exec --output-schema <엄격 스키마> -o <결과 파일> --json -`을 서브프로세스로. 지침과 계약서를 한 프롬프트로 stdin(UTF-8) | `codex_schema`가 pydantic 스키마를 OpenAI 엄격 규칙(모든 속성 required, additionalProperties false, 사전은 `[{key, value}]` 배열)으로 바꾼다 | `_restore`로 원래 모양(사전, 기본값)으로 되돌린 뒤 `schema.model_validate` |
 | `claude-code` | `claude -p --output-format json --json-schema <스키마> …`를 서브프로세스로. 계약서는 stdin(UTF-8) | `structured_output`(없으면 `result`를 JSON으로) | `schema.model_validate` |
 | `openai` | `POST {CLAUSETOWER_OPENAI_BASE_URL}/chat/completions` | 도구 `submit` 호출을 강제(`tool_choice`), 파라미터 = 스키마 | `schema.model_validate` |
 
@@ -341,7 +343,11 @@ P(s, 도착) = compute_penalty(지연 = 도착 − 마감)의 건별 금액
 
 호출은 `LLM.map`이 스레드 풀로 병렬 처리한다(`CLAUSETOWER_CONCURRENCY`, 기본 4, mock은 1). 계약 추출은 시나리오 간에 공유되므로 실제 모드의 호출 수는 8 + 시나리오당 8회다. 2회차 실제 실행은 2개 시나리오에 24회, CLI 보고 비용 $2.06였다(`eval/results/real/run.log`).
 
-### 7-5. `claude-code` 서브프로세스 격리
+### 7-5. `codex`·`claude-code` 서브프로세스 격리
+
+**`codex`(기본 연결).** 빈 임시 폴더를 작업 폴더로 쓰고 `--sandbox read-only`, `--disable shell_tool`·`apps`·`plugins`, `web_search="disabled"`, `--ephemeral`(세션 기록 안 남김)로 부른다. 계약서 본문에 심은 지시가 셸·파일·웹을 쓸 여지를 없앤다. 입출력은 UTF-8로 고정한다. 토큰 수는 `--json` 이벤트의 `turn.completed.usage`에서 센다. 비용은 구독(ChatGPT 로그인) 경로라 0으로 기록한다. 실패(예: `model_not_found`)는 한 번 다시 시도한 뒤 정답지로 대체하고 횟수를 남긴다. 측정 PC에서 Codex CLI 0.154.0, `CLAUSETOWER_CODEX_MODEL=gpt-6-astra`로 판단 1회(17초)와 계약 C 추출 1회(28초)를 돌려 대체 없이 통과했고, C 추출은 요율·유예·상한·통지 시한이 정답지와 같았다(2026-11-02, 시나리오 전체 재측정은 아님).
+
+**`claude-code`(대안).**
 
 - 빈 임시 폴더를 작업 폴더로 쓰고, `--no-session-persistence`로 세션을 남기지 않는다.
 - `--tools ""`로 내장 도구를 모두 끄고, `--strict-mcp-config`로 사용자 MCP 서버를 싣지 않는다. `--disallowedTools`(Bash, Read, Edit, Write, WebFetch 등) 거부 목록은 이중 안전장치로 남겼다.
@@ -406,7 +412,7 @@ P(s, 도착) = compute_penalty(지연 = 도착 − 마감)의 건별 금액
 
 ## 9. 로컬 도우미 API(`server.py`)
 
-브라우저는 Claude 구독(CLI)이나 사내망 LLM을 직접 부를 수 없으므로, PC에서 `python -m clausetower serve`로 도우미를 띄우면 웹 데모가 그 PC의 `llm.py`를 빌려 쓴다.
+브라우저는 Codex CLI나 사내망 LLM을 직접 부를 수 없으므로, PC에서 `python -m clausetower serve`로 도우미를 띄우면 웹 데모가 그 PC의 `llm.py`를 빌려 쓴다.
 
 | 메서드·경로 | 요청 본문 | 응답 |
 | --- | --- | --- |
@@ -470,7 +476,7 @@ P(s, 도착) = compute_penalty(지연 = 도착 − 마감)의 건별 금액
 | 웹 데모 | 정적 사이트 + JS 이식 | 서버형 API: 운영 비용과 계약서가 서버를 거치는 문제가 생기고, 심사위원이 링크 하나로 열 수 없다 | 같은 로직이 두 언어에 있다. 그래서 대조 검증(36/36, 75케이스)을 CI에 둔다 |
 | 오프라인 대시보드 | 단일 HTML, 인라인 SVG | 웹 데모만 사용: 심사장 네트워크가 끊기면 시연이 멈춘다 | 조작 패널은 웹에만 있다 |
 | LLM 실패 | 정답지·자리표시자로 대체하고 기록 | 실패 시 중단: 데모가 멈춘다 | 대체가 실제 결과로 오인될 수 있다. 그래서 `llm_fallbacks`, `fallback: true`, 출처 라벨로 드러낸다 |
-| LLM 연결 | 한 출입구(`llm.py`)에 모드 4종 | 공급자별 코드 분산: 재시도·검증·기록 규칙이 갈라진다 | 모드마다 구조화 출력 방식이 달라 분기가 있다 |
+| LLM 연결 | 한 출입구(`llm.py`)에 실제 모드 4종(기본 Codex CLI) + mock | 공급자별 코드 분산: 재시도·검증·기록 규칙이 갈라진다 | 모드마다 구조화 출력 방식이 달라 분기가 있다 |
 
 ---
 

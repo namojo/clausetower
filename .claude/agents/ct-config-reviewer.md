@@ -22,7 +22,7 @@ model: opus
 - 환경 요인(`kind: env`)과 코드 결함(`kind: defect`)을 구분한다. 사내 프록시나 cp949 때문에 실패하는 것은 환경 요인이지만, 심사위원 PC에서도 같은 일이 생기므로 문서·스크립트로 막을 방법을 함께 제안한다.
 - 설계 원칙을 깨는 수정은 제안하지 않는다: 돈 계산에 LLM을 쓰지 않는다, 계산은 결정적이다, 면책 적용 여부는 조건을 기계적으로 결합한다, 웹 엔진은 파이썬과 같은 숫자를 낸다.
 - 추적 중인 파일을 바꾸는 명령(`eval/run_eval.py robustness`의 기본 출력 경로 등)은 실행하지 않는다. 쓰기가 필요한 검사는 `_workspace/` 아래 경로로 출력을 돌린다.
-- 실제 LLM을 호출하는 명령(`--llm claude-code`, `--llm anthropic`, `scripts/real_run.py`)은 비용이 들므로 실행하지 않는다.
+- 실제 LLM을 호출하는 명령(`--llm codex`, `--llm claude-code`, `--llm anthropic`, `scripts/real_run.py`)은 비용이 들므로 실행하지 않는다.
 
 ## 입력·출력 규칙
 - 입력: 프롬프트로 관점 키, 게이트 결과 JSON 경로(`_workspace/01_qa_gates.json`), 선택적으로 이전 지적 목록 경로와 사용자 관심사.

@@ -124,12 +124,12 @@ GitHub Pages(`https://namojo.github.io/clausetower/`)에 올린 웹 데모는 �
 | 연결 방식 | 어떻게 | 언제 |
 | --- | --- | --- |
 | Anthropic API 키 | 브라우저가 api.anthropic.com을 직접 호출. 키는 기본으로 이 탭(sessionStorage)에만 두고, "이 브라우저에 기억"을 켤 때만 localStorage에 남긴다 | 개인 키가 있을 때 |
-| 로컬 도우미 | PC에서 `python -m clausetower serve --llm claude-code`. 브라우저가 127.0.0.1:8787로 요청하고 도우미가 기존 파이프라인으로 처리. 기본으로 `https://namojo.github.io`와 localhost·127.0.0.1 출처만 받고(`--allow-origin`, `CLAUSETOWER_ALLOWED_ORIGINS`로 추가), 목록 밖 출처는 403, JSON이 아닌 요청은 415, 동시 요청 초과는 429로 거절한다 | Claude 구독(Claude Code CLI)으로 쓸 때, 사내 LLM을 중계할 때(`--llm openai`) |
+| 로컬 도우미 | PC에서 `python -m clausetower serve --llm codex`(Codex CLI, 기본 연결). 브라우저가 127.0.0.1:8787로 요청하고 도우미가 기존 파이프라인으로 처리. 기본으로 `https://namojo.github.io`와 localhost·127.0.0.1 출처만 받고(`--allow-origin`, `CLAUSETOWER_ALLOWED_ORIGINS`로 추가), 목록 밖 출처는 403, JSON이 아닌 요청은 415, 동시 요청 초과는 429로 거절한다 | Claude 구독(Claude Code CLI)으로 쓸 때, 사내 LLM을 중계할 때(`--llm openai`) |
 | 사내·호환 엔드포인트 | OpenAI 호환 또는 Anthropic 호환 게이트웨이를 브라우저에서 직접 호출 | 사내 LLM이 CORS를 허용할 때 |
 
 실제 모델 호출이 실패해 자리표시자로 대체되면 도우미 응답에 `fallback` 표시가 붙고, 웹은 그 결과로 고객을 추가하거나 판단을 바꾸지 않는다.
 
-아래는 로컬 도우미를 Claude 구독으로 띄우고 예시 계약서를 올린 실제 실행이다. 요율(시간당 0.08%)·유예(3시간)·상한(8%)·면책 조항을 읽었고, 인용은 원문과 일치했다(화면의 확신도 85%).
+아래는 로컬 도우미를 Claude 구독(Codex 연결 도입 전)으로 띄우고 예시 계약서를 올린 실제 실행이다. 요율(시간당 0.08%)·유예(3시간)·상한(8%)·면책 조항을 읽었고, 인용은 원문과 일치했다(화면의 확신도 85%).
 
 ![실제 구독 경로 실행](screenshots/web/web_live_helper_real.png)
 
@@ -159,7 +159,7 @@ agent.py: 위를 묶어 Report(JSON) ─▶ dashboard.py(단일 HTML, 오프라�
 
 - **스키마가 계약이다.** `schemas.py`를 바꾸면 대시보드와 eval이 함께 바뀐다.
 - **법령·요율 수치는 코드에 없다.** 전부 계약서에서 추출한 `PenaltyTerms`에 있고, 계산기는 그것만 믿는다.
-- **LLM 모드.** `mock`(정답지, 네트워크 없음), `claude-code`(Claude Code CLI, API 키 없이 구독), `anthropic`(SDK, `ANTHROPIC_API_KEY`), `openai`(OpenAI 호환, 사내 LLM, `CLAUSETOWER_OPENAI_BASE_URL`). 기본 `auto`는 API 키 → 사내 엔드포인트 → Claude Code CLI → mock 순으로 고르고, 실제 LLM을 고르면 경고를 낸다. 호출이 실패하면 정답지로 대체하고 횟수를 보고서의 `llm_fallbacks`에 남긴다.
+- **LLM 모드.** `codex`(Codex CLI `codex exec`, 기본 연결), `mock`(정답지, 네트워크 없음), `claude-code`(Claude Code CLI, API 키 없이 구독), `anthropic`(SDK, `ANTHROPIC_API_KEY`), `openai`(OpenAI 호환, 사내 LLM, `CLAUSETOWER_OPENAI_BASE_URL`). 기본 `auto`는 API 키 → 사내 엔드포인트 → Claude Code CLI → mock 순으로 고르고, 실제 LLM을 고르면 경고를 낸다. 호출이 실패하면 정답지로 대체하고 횟수를 보고서의 `llm_fallbacks`에 남긴다.
 - **배상 노출 순의 정의.** 한 사이클 보류했을 때 늘어나는 배상금을 그 화물이 트럭을 묶는 시간으로 나눈 값. 절대값 변형도 함께 돌려 비교한다. 30개 시드 평균은 세 시나리오 모두 시간당 쪽이 조금 낮았고, 개별 실행에서는 절대값 쪽이 낮은 경우도 있다(태풍 기본 실행에서 절대값 2,979,000원, 시간당 2,996,500원).
 
 ## 7. 사업 연결
