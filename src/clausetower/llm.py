@@ -33,8 +33,8 @@ CLAUDE_TIMEOUT = int(os.environ.get("CLAUSETOWER_CLAUDE_TIMEOUT", "600"))
 CLAUDE_DISALLOWED_TOOLS = "Bash,Read,Edit,Write,MultiEdit,Glob,Grep,WebSearch,WebFetch,Agent,Task,NotebookEdit,TodoWrite,Skill"
 CODEX_BIN = os.environ.get("CLAUSETOWER_CODEX_BIN", "codex")
 CODEX_TIMEOUT = int(os.environ.get("CLAUSETOWER_CODEX_TIMEOUT", "600"))
-# 비워 두면 ~/.codex/config.toml의 model을 쓴다. 그 모델을 계정이 지원하지 않으면 여기에 지정한다.
-CODEX_MODEL = os.environ.get("CLAUSETOWER_CODEX_MODEL", "")
+# 기본 gpt-6.1-sol. 빈 문자열로 지정하면 ~/.codex/config.toml의 model을 쓴다.
+CODEX_MODEL = os.environ.get("CLAUSETOWER_CODEX_MODEL", "gpt-6.1-sol")
 CODEX_DEFAULT_LABEL = "codex 기본 모델"
 
 

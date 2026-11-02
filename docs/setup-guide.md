@@ -30,7 +30,7 @@ mock 모드(정답지 사용)만 쓰면 네트워크도 API 키도 필요 없다
 
 ## 2. 설치
 
-**반드시 편집 설치(`pip install -e`)를 한다.** 계약서(`contracts/`)·시나리오(`scenarios/`)·프롬프트(`prompts/`)가 패키지 밖 저장소 루트에 있어서다. 편집 설치를 하지 않으면 `No module named clausetower`가 나거나, `tests/test_web.py`의 하위 프로세스(`python -m clausetower demo`)가 실패한다. 다른 방식으로 설치했다면 `CLAUSETOWER_ROOT`에 저장소 루트를 지정한다(`src/clausetower/contracts.py`).
+**반드시 편집 설치(`pip install -e`)를 한다.** 계약서(`contracts/`)·시나리오(`scenarios/`)·프롬프트(`prompts/`)가 패키지 밖 저장소 루트에 있어서다. 저장소 루트에서 `python -m clausetower ...`를 실행하는 경우는 설치 없이도 동작한다(루트의 `clausetower/` 연결 패키지가 `src/clausetower`를 가리킨다). 다만 의존성(`pydantic`, `pyyaml`, `anthropic`)은 있어야 하고, 저장소 밖 폴더나 `clausetower` 콘솔 명령으로 실행하려면 편집 설치가 필요하다. 다른 방식으로 설치했다면 `CLAUSETOWER_ROOT`에 저장소 루트를 지정한다(`src/clausetower/contracts.py`).
 
 **macOS·Linux(bash)**
 
@@ -114,7 +114,7 @@ PowerShell에서도 명령은 같다.
 | 모드 | 무엇 | 준비 |
 | --- | --- | --- |
 | `mock` | 정답지를 그대로 사용. 네트워크 없음 | 없음 |
-| `codex` | Codex CLI(`codex exec`)를 하위 프로세스로 호출. **기본 연결** | `codex` CLI 설치·로그인. 계정이 config.toml의 기본 모델을 지원하지 않으면 `CLAUSETOWER_CODEX_MODEL` 지정 |
+| `codex` | Codex CLI(`codex exec`)를 하위 프로세스로 호출. **기본 연결** | `codex` CLI 설치·로그인. 모델은 기본 `gpt-6.1-sol`(`CLAUSETOWER_CODEX_MODEL`로 변경) |
 | `claude-code` | Claude Code CLI를 하위 프로세스로 호출(Claude 구독) | `claude` CLI 설치·로그인. 못 찾으면 경고 후 mock으로 전환 |
 | `anthropic` | Anthropic SDK | `ANTHROPIC_API_KEY`(사내 호환 게이트웨이면 `ANTHROPIC_BASE_URL`도) |
 | `openai` | OpenAI 호환 `/chat/completions` + 강제 tool call(사내 LLM) | `CLAUSETOWER_OPENAI_BASE_URL`, 필요하면 `CLAUSETOWER_OPENAI_API_KEY`, `CLAUSETOWER_MODEL` |
@@ -128,7 +128,7 @@ PowerShell에서도 명령은 같다.
 | `CLAUSETOWER_MODEL` | `claude-opus-5-5` | 모델 이름. `openai` 모드에서는 사내 모델 이름을 넣는다 |
 | `CLAUSETOWER_CONCURRENCY` | `4`(mock은 1) | 동시 호출 수 |
 | `CLAUSETOWER_CODEX_BIN` | `codex` | Codex CLI 실행 파일 경로. PATH에 없을 때 |
-| `CLAUSETOWER_CODEX_MODEL` | 없음(config.toml의 `model`) | Codex 모델. 계정이 기본 모델을 지원하지 않으면(`model_not_found`) 지정한다. 측정 PC는 `gpt-6-astra` |
+| `CLAUSETOWER_CODEX_MODEL` | `gpt-6.1-sol` | Codex 모델. 빈 문자열이면 config.toml의 `model`을 쓴다. 로그인한 계정이 지원하지 않으면 `model_not_found`가 난다 |
 | `CLAUSETOWER_CODEX_TIMEOUT` | `600` | Codex 호출 하나의 제한 시간(초) |
 | `CLAUSETOWER_CLAUDE_BIN` | `claude` | CLI 실행 파일 경로. PATH에 없을 때 |
 | `CLAUSETOWER_CLAUDE_TIMEOUT` | `600` | 호출 하나의 제한 시간(초). `openai` 모드에도 쓰인다 |
@@ -233,7 +233,7 @@ node scripts/smoke_web.js site/index.html out/smoke                             
 
 | 증상 | 원인 | 해결 |
 | --- | --- | --- |
-| `No module named clausetower`, `tests/test_web.py` 6건 ERROR(Node가 없으면 2건) | 패키지 미설치(가상 환경 활성화 전 설치 포함) | 가상 환경을 켜고 `pip install -e ".[dev]"`. 급하면 그 창에서만 `PYTHONPATH=src` |
+| `No module named clausetower`, `tests/test_web.py` 6건 ERROR(Node가 없으면 2건) | 저장소 루트가 아닌 폴더에서 실행했거나 패키지 미설치(가상 환경 활성화 전 설치 포함) | 가상 환경을 켜고 `pip install -e ".[dev]"`. 급하면 그 창에서만 `PYTHONPATH=src` |
 | `FileNotFoundError: ClauseTower 데이터 폴더 'contracts/'를 찾지 못했다` | 편집 설치가 아님(사이트 패키지에 복사됨) | 저장소 루트에서 `pip install -e .` 또는 `CLAUSETOWER_ROOT`에 저장소 루트 지정 |
 | 로컬 도우미 `/health`가 502나 HTML 오류 페이지 | 사내 프록시가 127.0.0.1 요청을 가로챔(`NO_PROXY`에 127.0.0.1 없음) | `$env:NO_PROXY += ',127.0.0.1,localhost'`(bash는 `export NO_PROXY=…`). `pytest`는 스스로 보정한다 |
 | `UnicodeEncodeError`, 콘솔이나 리디렉션한 파일의 한글이 깨짐 | 한국어 Windows 콘솔 인코딩 cp949 | `$env:PYTHONUTF8 = "1"` |
@@ -244,7 +244,7 @@ node scripts/smoke_web.js site/index.html out/smoke                             
 | `verify_engine.js`가 `MISSING out/demo/report_*.json` 또는 `llm_mode=… not mock` | mock 데모를 안 돌렸거나 실제 모드로 덮어씀 | `python -m clausetower demo --llm mock` 뒤 다시 |
 | `verify_engine.js`가 `MISSING site/data.js` | 사이트 미조립 | `python scripts/build_site.py` |
 | 로그에 `codex CLI를 찾지 못해 mock으로 전환한다.` | `codex` CLI 미설치 또는 PATH 밖 | Codex CLI 설치·로그인, 또는 `CLAUSETOWER_CODEX_BIN`에 경로 지정 |
-| 로그에 `codex 종료 코드 1 (model_not_found)` | config.toml의 기본 모델을 이 계정(ChatGPT 로그인)이 지원하지 않음 | `CLAUSETOWER_CODEX_MODEL`에 지원 모델 지정(예: `gpt-6-astra`). `codex exec -m <모델> "hi"`로 먼저 확인 |
+| 로그에 `codex 종료 코드 1 (model_not_found)` | config.toml의 기본 모델을 이 계정(ChatGPT 로그인)이 지원하지 않음 | `CLAUSETOWER_CODEX_MODEL`에 계정이 지원하는 모델 지정. `codex exec -m <모델> "hi"`로 먼저 확인 |
 | 로그에 `claude CLI를 찾지 못해 mock으로 전환한다.` | `claude` CLI 미설치 또는 PATH 밖 | CLI 설치·로그인, 또는 `CLAUSETOWER_CLAUDE_BIN`에 경로 지정. 전환된 실행의 숫자는 정답지 값이다 |
 | `주의: --llm을 지정하지 않아 auto가 실제 LLM(…)을 골랐다` | `--llm` 생략, PC에 키나 CLI가 있음 | 비용 없이 보려면 `--llm mock` 또는 `CLAUSETOWER_LLM=mock` |
 | `run.log`의 `fallbacks`나 보고서 `llm_fallbacks`가 0보다 큼 | 실제 모델 호출 실패(시간 초과, 인증, 출력 형식) | 도우미·CLI 로그(stderr)를 확인. 시간 초과면 `CLAUSETOWER_CLAUDE_TIMEOUT`을 늘린다 |

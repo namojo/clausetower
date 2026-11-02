@@ -274,7 +274,7 @@ agent.py: 위를 묶어 Report(JSON) ─▶ dashboard.py(단일 HTML, 오프라�
 | 모드 | 무엇 | 언제 |
 | --- | --- | --- |
 | `mock` | 정답지를 그대로 사용, 네트워크 없음 | 테스트, 오프라인 데모 |
-| `codex` | Codex CLI(`codex exec`)를 서브프로세스로 호출. 읽기 전용 샌드박스, 셸·앱·플러그인·웹 검색 끔, 빈 임시 폴더, 엄격 JSON 스키마(`--output-schema`)로 구조화 출력 | **기본 연결.** `codex` CLI 설치·로그인(`CLAUSETOWER_CODEX_MODEL`로 모델 지정) |
+| `codex` | Codex CLI(`codex exec`)를 서브프로세스로 호출. 읽기 전용 샌드박스, 셸·앱·플러그인·웹 검색 끔, 빈 임시 폴더, 엄격 JSON 스키마(`--output-schema`)로 구조화 출력 | **기본 연결.** `codex` CLI 설치·로그인. 모델 기본 `gpt-6.1-sol`(`CLAUSETOWER_CODEX_MODEL`로 변경) |
 | `claude-code` | Claude Code CLI를 서브프로세스로 호출 | 대안: Claude 구독으로 |
 | `anthropic` | Anthropic SDK | `ANTHROPIC_API_KEY`가 있을 때 |
 | `openai` | OpenAI 호환 chat/completions + 강제 tool call | 사내 LLM(`CLAUSETOWER_OPENAI_BASE_URL`, `CLAUSETOWER_OPENAI_API_KEY`, `CLAUSETOWER_MODEL`) |
@@ -343,7 +343,7 @@ agent.py: 위를 묶어 Report(JSON) ─▶ dashboard.py(단일 HTML, 오프라�
 ```bash
 cd clausetower
 python -m venv .venv && . .venv/bin/activate      # Windows PowerShell은 docs/setup-guide.md
-pip install -e ".[dev]"                           # 편집 설치 필수(계약서·시나리오·프롬프트가 저장소 루트에 있다)
+pip install -e ".[dev]"                           # 편집 설치 권장. 저장소 루트에서 python -m clausetower로 실행하면 설치 없이도 된다(의존성은 필요)
 python -m clausetower demo --llm mock             # 3개 시나리오 실행 + out/demo/dashboard.html (네트워크 불필요)
 python -m clausetower run typhoon --llm mock      # 하나만
 python -m clausetower serve --llm codex           # 웹 데모용 로컬 도우미(Codex CLI, 기본 연결). --llm openai 로 사내 LLM
